@@ -21,7 +21,9 @@ export function App() {
     loadAllChampions,
     leaveOnlineRoom,
     resetSeries,
-    runAiTurn,
+    getAiDecision,
+    hoverChampion,
+    selectChampion,
     tickTimer,
   } = useDraftStore();
 
@@ -29,19 +31,45 @@ export function App() {
     void loadAllChampions();
   }, [loadAllChampions]);
 
-  // 솔로 연습 (vs AI) 모드에서 AI 턴 자동 진행 (드래프트 화면일 때만)
+  // 솔로 연습 (vs AI) 모드에서 AI가 고민 후 임시 선택(호버) -> 확정(Lock-in)하는 자연스러운 딜레이 연출
   useEffect(() => {
     if (view !== 'DRAFT') return;
     if (draftMode !== 'SOLO_AI') return;
     const step = getDraftOrder(firstPickSide)[currentStepIndex];
     if (!step || step.side === userSide) return;
 
-    const timer = window.setTimeout(() => {
-      runAiTurn();
-    }, 450);
+    const decisionId = getAiDecision();
+    if (!decisionId) return;
 
-    return () => window.clearTimeout(timer);
-  }, [view, currentStepIndex, draftMode, firstPickSide, userSide, runAiTurn]);
+    // 밴은 0.9~1.6초, 픽은 1.1~1.9초 고민 후 임시 선택(호버), 이후 0.7~1.1초 뒤 확정
+    const thinkDelayMs =
+      step.type === 'BAN'
+        ? 900 + Math.floor(Math.random() * 700)
+        : 1100 + Math.floor(Math.random() * 800);
+    const hoverHoldMs = 700 + Math.floor(Math.random() * 400);
+
+    const hoverTimer = window.setTimeout(() => {
+      hoverChampion(decisionId);
+    }, thinkDelayMs);
+
+    const lockTimer = window.setTimeout(() => {
+      selectChampion(decisionId);
+    }, thinkDelayMs + hoverHoldMs);
+
+    return () => {
+      window.clearTimeout(hoverTimer);
+      window.clearTimeout(lockTimer);
+    };
+  }, [
+    view,
+    currentStepIndex,
+    draftMode,
+    firstPickSide,
+    userSide,
+    getAiDecision,
+    hoverChampion,
+    selectChampion,
+  ]);
 
   // 1:1 / 솔로 모드 턴 타이머 (드래프트 화면일 때만, 온라인 방은 양쪽 모두 접속 시 시작)
   useEffect(() => {

@@ -110,6 +110,7 @@ interface DraftStoreState {
   confirmSelection: () => void;
   selectChampion: (championId: string) => void;
   swapPickSlots: (side: DraftSide, fromIndex: number, toIndex: number) => void;
+  getAiDecision: () => string | null;
   runAiTurn: () => void;
   undoLastAction: () => void;
   setCurrentWinner: (winner: DraftSide) => void;
@@ -586,12 +587,12 @@ export const useDraftStore = create<DraftStoreState>()(
         syncIfOnline(get);
       },
 
-      runAiTurn: () => {
+      getAiDecision: () => {
         const state = get();
-        if (state.draftMode !== 'SOLO_AI') return;
+        if (state.draftMode !== 'SOLO_AI') return null;
 
         const step = getDraftOrder(state.firstPickSide)[state.currentStepIndex];
-        if (!step || step.side === state.userSide) return;
+        if (!step || step.side === state.userSide) return null;
 
         const aiSide = step.side;
         const aiPickIds = aiSide === 'BLUE' ? state.bluePicks : state.redPicks;
@@ -617,8 +618,13 @@ export const useDraftStore = create<DraftStoreState>()(
             ? decideBan(state.champions, context)
             : decidePick(state.champions, context);
 
-        if (decision) {
-          get().selectChampion(decision.id);
+        return decision ? decision.id : null;
+      },
+
+      runAiTurn: () => {
+        const decisionId = get().getAiDecision();
+        if (decisionId) {
+          get().selectChampion(decisionId);
         }
       },
 
@@ -685,10 +691,10 @@ export const useDraftStore = create<DraftStoreState>()(
           timeLeft: state.timerDuration,
           ...(swapNextSides
             ? {
-                blueTeamName: state.redTeamName,
-                redTeamName: state.blueTeamName,
-                userSide: state.userSide === 'BLUE' ? 'RED' : 'BLUE',
-              }
+              blueTeamName: state.redTeamName,
+              redTeamName: state.blueTeamName,
+              userSide: state.userSide === 'BLUE' ? 'RED' : 'BLUE',
+            }
             : {}),
         });
 
