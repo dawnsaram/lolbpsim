@@ -16,6 +16,7 @@ export interface RoomPeers {
 export interface SyncedDraftPayload {
   seriesFormat: SeriesFormat;
   fearlessRule: FearlessRule;
+  firstPickSide: DraftSide;
   blueTeamName: string;
   redTeamName: string;
   timerEnabled: boolean;

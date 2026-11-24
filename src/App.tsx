@@ -4,7 +4,7 @@ import { CompAnalyzerPanel } from '@/components/CompAnalyzerPanel';
 import { MatchCompleteBanner, SidePanel } from '@/components/DraftBoard';
 import { Header } from '@/components/Header';
 import { StartScreen } from '@/components/StartScreen';
-import { TOURNAMENT_DRAFT_ORDER } from '@/constants/draftOrder';
+import { getDraftOrder } from '@/constants/draftOrder';
 import { useDraftStore } from '@/store/useDraftStore';
 
 export function App() {
@@ -13,6 +13,7 @@ export function App() {
   const {
     currentStepIndex,
     draftMode,
+    firstPickSide,
     userSide,
     timerEnabled,
     roomCode,
@@ -32,7 +33,7 @@ export function App() {
   useEffect(() => {
     if (view !== 'DRAFT') return;
     if (draftMode !== 'SOLO_AI') return;
-    const step = TOURNAMENT_DRAFT_ORDER[currentStepIndex];
+    const step = getDraftOrder(firstPickSide)[currentStepIndex];
     if (!step || step.side === userSide) return;
 
     const timer = window.setTimeout(() => {
@@ -40,13 +41,13 @@ export function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [view, currentStepIndex, draftMode, userSide, runAiTurn]);
+  }, [view, currentStepIndex, draftMode, firstPickSide, userSide, runAiTurn]);
 
   // 1:1 / 솔로 모드 턴 타이머 (드래프트 화면일 때만, 온라인 방은 양쪽 모두 접속 시 시작)
   useEffect(() => {
     if (view !== 'DRAFT') return;
     if (!timerEnabled) return;
-    const step = TOURNAMENT_DRAFT_ORDER[currentStepIndex];
+    const step = getDraftOrder(firstPickSide)[currentStepIndex];
     if (!step) return;
     if (draftMode === 'SOLO_AI' && step.side !== userSide) return;
     if (
@@ -66,6 +67,7 @@ export function App() {
     view,
     currentStepIndex,
     draftMode,
+    firstPickSide,
     userSide,
     timerEnabled,
     roomCode,

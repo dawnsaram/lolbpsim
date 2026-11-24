@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { TOURNAMENT_DRAFT_ORDER } from '@/constants/draftOrder';
+import { getDraftOrder, TOURNAMENT_DRAFT_ORDER } from '@/constants/draftOrder';
 import {
   buildChampionMap,
   CURATED_CHAMPIONS,
@@ -26,6 +26,7 @@ import type {
   GameRecord,
   Role,
   SeriesFormat,
+  SidePickSelectionMode,
 } from '@/types/draft';
 import { arrangePicksByRole, getAvailablePool } from '@/utils/pool';
 
@@ -55,6 +56,8 @@ interface DraftStoreState {
   seriesFormat: SeriesFormat;
   fearlessRule: FearlessRule;
   draftMode: DraftMode;
+  selectionMode: SidePickSelectionMode;
+  firstPickSide: DraftSide;
   userSide: DraftSide;
   aiStyle: AiStyle;
   blueTeamName: string;
@@ -92,6 +95,8 @@ interface DraftStoreState {
   setSeriesFormat: (format: SeriesFormat) => void;
   setFearlessRule: (rule: FearlessRule) => void;
   setDraftMode: (mode: DraftMode) => void;
+  setSelectionMode: (mode: SidePickSelectionMode) => void;
+  setFirstPickSide: (side: DraftSide) => void;
   setUserSide: (side: DraftSide) => void;
   setAiStyle: (style: AiStyle) => void;
   setTeamName: (side: DraftSide, name: string) => void;
@@ -146,6 +151,7 @@ function buildSyncedPayload(state: DraftStoreState): SyncedDraftPayload {
   return {
     seriesFormat: state.seriesFormat,
     fearlessRule: state.fearlessRule,
+    firstPickSide: state.firstPickSide,
     blueTeamName: state.blueTeamName,
     redTeamName: state.redTeamName,
     timerEnabled: state.timerEnabled,
@@ -232,6 +238,8 @@ export const useDraftStore = create<DraftStoreState>()(
       seriesFormat: 'BO5',
       fearlessRule: 'HARD',
       draftMode: 'VS_1V1',
+      selectionMode: 'MANUAL',
+      firstPickSide: 'BLUE',
       userSide: 'BLUE',
       aiStyle: 'META',
       blueTeamName: 'BLUE TEAM',
@@ -402,6 +410,11 @@ export const useDraftStore = create<DraftStoreState>()(
           hoveredChampionId: null,
           timeLeft: state.timerDuration,
         })),
+      setSelectionMode: (selectionMode) => set({ selectionMode }),
+      setFirstPickSide: (firstPickSide) => {
+        set({ firstPickSide });
+        syncIfOnline(get);
+      },
       setUserSide: (userSide) => set({ userSide }),
       setAiStyle: (aiStyle) => set({ aiStyle }),
       setTeamName: (side, name) => {
@@ -434,7 +447,7 @@ export const useDraftStore = create<DraftStoreState>()(
         const state = get();
         if (!state.timerEnabled) return;
 
-        const step = TOURNAMENT_DRAFT_ORDER[state.currentStepIndex];
+        const step = getDraftOrder(state.firstPickSide)[state.currentStepIndex];
         if (!step) return;
 
         if (state.draftMode === 'SOLO_AI' && step.side !== state.userSide) {
@@ -493,7 +506,7 @@ export const useDraftStore = create<DraftStoreState>()(
 
       selectChampion: (championId) => {
         const state = get();
-        const step = TOURNAMENT_DRAFT_ORDER[state.currentStepIndex];
+        const step = getDraftOrder(state.firstPickSide)[state.currentStepIndex];
         if (!step) return;
 
         const lockedIds = getFearlessLockedIds(
@@ -577,7 +590,7 @@ export const useDraftStore = create<DraftStoreState>()(
         const state = get();
         if (state.draftMode !== 'SOLO_AI') return;
 
-        const step = TOURNAMENT_DRAFT_ORDER[state.currentStepIndex];
+        const step = getDraftOrder(state.firstPickSide)[state.currentStepIndex];
         if (!step || step.side === state.userSide) return;
 
         const aiSide = step.side;
@@ -614,7 +627,7 @@ export const useDraftStore = create<DraftStoreState>()(
         if (state.currentStepIndex === 0) return;
 
         const prevIndex = state.currentStepIndex - 1;
-        const prevStep = TOURNAMENT_DRAFT_ORDER[prevIndex];
+        const prevStep = getDraftOrder(state.firstPickSide)[prevIndex];
         if (!prevStep) return;
 
         const nextState: Partial<DraftStoreState> = {
@@ -741,6 +754,8 @@ export const useDraftStore = create<DraftStoreState>()(
         seriesFormat: state.seriesFormat,
         fearlessRule: state.fearlessRule,
         draftMode: state.draftMode,
+        selectionMode: state.selectionMode,
+        firstPickSide: state.firstPickSide,
         userSide: state.userSide,
         aiStyle: state.aiStyle,
         blueTeamName: state.blueTeamName,

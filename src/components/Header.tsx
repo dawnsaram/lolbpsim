@@ -38,6 +38,7 @@ export function Header({ onGoHome }: HeaderProps) {
     seriesFormat,
     fearlessRule,
     draftMode,
+    firstPickSide,
     aiStyle,
     blueTeamName,
     redTeamName,
@@ -49,6 +50,7 @@ export function Header({ onGoHome }: HeaderProps) {
     setSeriesFormat,
     setFearlessRule,
     setDraftMode,
+    setFirstPickSide,
     setAiStyle,
     setTeamName,
     swapSides,
@@ -346,6 +348,29 @@ export function Header({ onGoHome }: HeaderProps) {
                     ),
                   )}
                 </select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] text-slate-400">
+                선픽(1픽) 진영 {currentStepIndex > 0 ? '(시작 전 변경 가능)' : ''}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['BLUE', 'RED'] as const).map((side) => (
+                  <button
+                    key={side}
+                    type="button"
+                    disabled={currentStepIndex > 0 || onlineSide === 'SPECTATOR'}
+                    onClick={() => setFirstPickSide(side)}
+                    className={`rounded-md border py-1 font-bold transition disabled:opacity-40 ${
+                      firstPickSide === side
+                        ? 'border-amber-400 bg-amber-400 text-slate-950'
+                        : 'border-slate-700 bg-slate-950 text-slate-300'
+                    }`}
+                  >
+                    {side === 'BLUE' ? 'BLUE 선픽' : 'RED 선픽'}
+                  </button>
+                ))}
               </div>
             </div>
 

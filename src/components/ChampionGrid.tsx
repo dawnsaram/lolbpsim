@@ -1,7 +1,7 @@
 import {
   ALL_ROLES,
+  getDraftOrder,
   ROLE_LABELS,
-  TOURNAMENT_DRAFT_ORDER,
 } from '@/constants/draftOrder';
 import { getChampionIconUrl } from '@/services/ddragon';
 import { getFearlessLockedIds, useDraftStore } from '@/store/useDraftStore';
@@ -17,6 +17,7 @@ export function ChampionGrid() {
     roomCode,
     onlineSide,
     roomPeers,
+    firstPickSide,
     currentStepIndex,
     hoveredChampionId,
     blueTeamName,
@@ -41,7 +42,7 @@ export function ChampionGrid() {
     selectChampion,
   } = useDraftStore();
 
-  const currentStep = TOURNAMENT_DRAFT_ORDER[currentStepIndex];
+  const currentStep = getDraftOrder(firstPickSide)[currentStepIndex];
   const isAiTurn =
     draftMode === 'SOLO_AI' &&
     Boolean(currentStep) &&

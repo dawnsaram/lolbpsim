@@ -16,6 +16,10 @@ export type DraftMode = 'SOLO_AI' | 'VS_1V1' | 'MANUAL';
 
 export type SeriesFormat = 'BO1' | 'BO3' | 'BO5';
 
+export type SidePickSelectionMode = 'MANUAL' | 'COIN_TOSS' | 'ROFS';
+
+export type RofsCategory = 'SIDE' | 'PICK_ORDER';
+
 export interface ChampionStats {
   /** 앞라인/탱킹 (0~5) */
   frontline: number;

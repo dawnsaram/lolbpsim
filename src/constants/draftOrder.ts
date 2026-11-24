@@ -1,4 +1,10 @@
-import type { AiStyle, DraftStep, FearlessRule, Role } from '@/types/draft';
+import type {
+  AiStyle,
+  DraftSide,
+  DraftStep,
+  FearlessRule,
+  Role,
+} from '@/types/draft';
 
 export const ALL_ROLES: Role[] = ['TOP', 'JGL', 'MID', 'BOT', 'SUP'];
 
@@ -79,3 +85,17 @@ export const TOURNAMENT_DRAFT_ORDER: DraftStep[] = [
   { index: 18, phase: 'PICK_2', side: 'BLUE', type: 'PICK', slotIndex: 4 },
   { index: 19, phase: 'PICK_2', side: 'RED', type: 'PICK', slotIndex: 4 },
 ];
+
+/**
+ * 선픽 진영(firstPickSide)에 따라 실제 20스텝 드래프트 순서를 반환합니다.
+ * - BLUE 선픽: 기본 토너먼트 순서
+ * - RED 선픽 (RoFS 등으로 진영과 픽순이 분리된 경우): BLUE/RED 턴을 반전
+ */
+export function getDraftOrder(firstPickSide: DraftSide = 'BLUE'): DraftStep[] {
+  if (firstPickSide === 'BLUE') return TOURNAMENT_DRAFT_ORDER;
+
+  return TOURNAMENT_DRAFT_ORDER.map((step) => ({
+    ...step,
+    side: step.side === 'BLUE' ? 'RED' : 'BLUE',
+  }));
+}

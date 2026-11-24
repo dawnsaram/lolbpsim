@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ALL_ROLES,
+  getDraftOrder,
   ROLE_LABELS,
   TOURNAMENT_DRAFT_ORDER,
 } from '@/constants/draftOrder';
@@ -18,6 +19,7 @@ export function SidePanel({ side }: SidePanelProps) {
     championMap,
     ddragonVersion,
     draftMode,
+    firstPickSide,
     roomCode,
     onlineSide,
     currentStepIndex,
@@ -36,7 +38,7 @@ export function SidePanel({ side }: SidePanelProps) {
   const canSwapThisSide =
     !(draftMode === 'VS_1V1' && roomCode) || onlineSide === side;
 
-  const currentStep = TOURNAMENT_DRAFT_ORDER[currentStepIndex];
+  const currentStep = getDraftOrder(firstPickSide)[currentStepIndex];
   const isBlue = side === 'BLUE';
   const teamName = isBlue ? blueTeamName : redTeamName;
   const bans = isBlue ? blueBans : redBans;
@@ -86,6 +88,15 @@ export function SidePanel({ side }: SidePanelProps) {
           </h2>
           <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
             {side}
+          </span>
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+              firstPickSide === side
+                ? 'bg-amber-400/20 text-amber-300'
+                : 'bg-slate-800/80 text-slate-400'
+            }`}
+          >
+            {firstPickSide === side ? '선픽' : '후픽'}
           </span>
         </div>
         <span className="text-[11px] text-slate-400">

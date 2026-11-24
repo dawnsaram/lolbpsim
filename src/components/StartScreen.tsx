@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SidePickSelector } from '@/components/SidePickSelector';
 import {
   AI_STYLE_META,
   FEARLESS_RULE_META,
@@ -7,7 +8,6 @@ import { useDraftStore } from '@/store/useDraftStore';
 import type {
   AiStyle,
   DraftMode,
-  DraftSide,
   FearlessRule,
   SeriesFormat,
 } from '@/types/draft';
@@ -80,7 +80,6 @@ export function StartScreen({
     setSeriesFormat,
     setFearlessRule,
     setDraftMode,
-    setUserSide,
     setAiStyle,
     setTeamName,
     setTimerEnabled,
@@ -262,56 +261,27 @@ export function StartScreen({
             </div>
           </div>
 
-          {/* 3. 진영 선택 & AI 성향 */}
-          {(draftMode === 'SOLO_AI' || draftMode === 'VS_1V1') && (
-            <div
-              className={`grid grid-cols-1 gap-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3.5 ${
-                draftMode === 'SOLO_AI' ? 'sm:grid-cols-2' : ''
-              }`}
-            >
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-400">
-                  {draftMode === 'VS_1V1' ? '방장 진영 선택' : '내 진영 선택'}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['BLUE', 'RED'] as DraftSide[]).map((side) => (
-                    <button
-                      key={side}
-                      type="button"
-                      onClick={() => setUserSide(side)}
-                      className={`rounded-lg border py-1.5 text-xs font-bold transition ${
-                        userSide === side
-                          ? side === 'BLUE'
-                            ? 'border-sky-400 bg-sky-500 text-slate-950'
-                            : 'border-rose-400 bg-rose-500 text-slate-950'
-                          : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      {side === 'BLUE' ? 'BLUE (선픽)' : 'RED (후픽)'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* 3. 진영 및 픽순 선택 (수동 / 코인 토스 / RoFS) */}
+          <SidePickSelector />
 
-              {draftMode === 'SOLO_AI' && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-400">
-                    AI 성향 프리셋
-                  </label>
-                  <select
-                    value={aiStyle}
-                    onChange={(e) => setAiStyle(e.target.value as AiStyle)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-100"
-                  >
-                    {(Object.keys(AI_STYLE_META) as AiStyle[]).map((style) => (
-                      <option key={style} value={style}>
-                        {AI_STYLE_META[style].label} —{' '}
-                        {AI_STYLE_META[style].description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+          {/* AI 성향 프리셋 (SOLO_AI 전용) */}
+          {draftMode === 'SOLO_AI' && (
+            <div className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
+              <label className="text-xs font-semibold text-slate-400">
+                AI 성향 프리셋
+              </label>
+              <select
+                value={aiStyle}
+                onChange={(e) => setAiStyle(e.target.value as AiStyle)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-100"
+              >
+                {(Object.keys(AI_STYLE_META) as AiStyle[]).map((style) => (
+                  <option key={style} value={style}>
+                    {AI_STYLE_META[style].label} —{' '}
+                    {AI_STYLE_META[style].description}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 
