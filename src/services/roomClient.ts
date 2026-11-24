@@ -61,6 +61,10 @@ class RoomClient {
   private closeHandlers = new Set<CloseHandler>();
 
   private getWsUrl(): string {
+    const customWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
+    if (customWsUrl && customWsUrl.trim()) {
+      return customWsUrl.trim();
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/ws`;
   }

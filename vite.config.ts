@@ -2,7 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: mode === 'production' ? '/lolbpsim/' : '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -17,4 +18,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
