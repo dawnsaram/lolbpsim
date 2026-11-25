@@ -2,7 +2,9 @@ import type {
   DraftSide,
   FearlessRule,
   GameRecord,
+  RofsCategory,
   SeriesFormat,
+  SidePickSelectionMode,
 } from '@/types/draft';
 
 export type OnlineRole = DraftSide | 'SPECTATOR';
@@ -13,9 +15,15 @@ export interface RoomPeers {
   spectatorCount: number;
 }
 
+export interface NextGameRofsFirst {
+  category: RofsCategory;
+  value: string;
+}
+
 export interface SyncedDraftPayload {
   seriesFormat: SeriesFormat;
   fearlessRule: FearlessRule;
+  selectionMode: SidePickSelectionMode;
   firstPickSide: DraftSide;
   blueTeamName: string;
   redTeamName: string;
@@ -29,6 +37,7 @@ export interface SyncedDraftPayload {
   bluePicks: string[];
   redPicks: string[];
   currentWinner: DraftSide | null;
+  nextGameRofsFirst: NextGameRofsFirst | null;
   history: GameRecord[];
 }
 

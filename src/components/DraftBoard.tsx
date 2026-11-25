@@ -282,12 +282,19 @@ export function SidePanel({ side }: SidePanelProps) {
 export function MatchCompleteBanner() {
   const {
     seriesFormat,
+    selectionMode,
+    draftMode,
+    userSide,
+    roomCode,
+    onlineSide,
     gameNumber,
     currentStepIndex,
     blueTeamName,
     redTeamName,
     currentWinner,
+    nextGameRofsFirst,
     setCurrentWinner,
+    setNextGameRofsFirst,
     proceedToNextGame,
   } = useDraftStore();
 
@@ -295,64 +302,352 @@ export function MatchCompleteBanner() {
   if (!isDraftComplete) return null;
 
   const maxGames = getMaxGames(seriesFormat);
+  const hasNextGame = gameNumber < maxGames;
+  const isOnlineRoom = draftMode === 'VS_1V1' && Boolean(roomCode);
+
+  const loserSide: DraftSide | null = currentWinner
+    ? currentWinner === 'BLUE'
+      ? 'RED'
+      : 'BLUE'
+    : null;
+  const loserTeamName =
+    loserSide === 'BLUE' ? blueTeamName : redTeamName;
+  const winnerTeamName =
+    currentWinner === 'BLUE' ? blueTeamName : redTeamName;
+
+  const isLoserAi =
+    draftMode === 'SOLO_AI' && loserSide !== null && loserSide !== userSide;
+  const isWinnerAi =
+    draftMode === 'SOLO_AI' &&
+    currentWinner !== null &&
+    currentWinner !== userSide;
+
+  const canActAsLoser =
+    !isOnlineRoom || (loserSide !== null && onlineSide === loserSide);
+  const canActAsWinner =
+    !isOnlineRoom || (currentWinner !== null && onlineSide === currentWinner);
+
+  // 수동 / 코인토스 모드: 패배팀 진영 선택
+  const handleLoserChooseSide = (chosenSide: DraftSide) => {
+    if (!loserSide) return;
+    const swapNextSides = chosenSide !== loserSide;
+    proceedToNextGame({
+      swapNextSides,
+      nextFirstPickSide: 'BLUE',
+    });
+  };
+
+  // RoFS 모드: 패배팀 1차 선택 (진영 또는 픽순)
+  const handleLoserRofsFirst = (category: 'SIDE' | 'PICK_ORDER', value: string) => {
+    if (!loserSide) return;
+
+    // 솔로 AI 모드에서 승리팀이 AI면 AI가 즉시 2차 선택을 수행하고 다음 세트로 진행
+    if (isWinnerAi) {
+      if (category === 'SIDE') {
+        const loserNextSide = value as DraftSide;
+        const swapNextSides = loserNextSide !== loserSide;
+        // 승리한 AI는 선픽 선호
+        const aiNextSide: DraftSide = loserNextSide === 'BLUE' ? 'RED' : 'BLUE';
+        proceedToNextGame({
+          swapNextSides,
+          nextFirstPickSide: aiNextSide,
+        });
+      } else {
+        // 패배한 유저가 픽순 선택 -> 승리한 AI가 BLUE 진영 선택
+        const loserPickOrder = value as 'FIRST' | 'SECOND';
+        const loserNextSide: DraftSide = 'RED';
+        const swapNextSides = loserNextSide !== loserSide;
+        const nextFirstPickSide: DraftSide =
+          loserPickOrder === 'FIRST' ? loserNextSide : 'BLUE';
+        proceedToNextGame({
+          swapNextSides,
+          nextFirstPickSide,
+        });
+      }
+      return;
+    }
+
+    setNextGameRofsFirst({ category, value });
+  };
+
+  // RoFS 모드: 승리팀 2차 선택 (남은 항목)
+  const handleWinnerRofsSecond = (value: string) => {
+    if (!loserSide || !nextGameRofsFirst) return;
+
+    if (nextGameRofsFirst.category === 'SIDE') {
+      const loserNextSide = nextGameRofsFirst.value as DraftSide;
+      const winnerNextSide: DraftSide =
+        loserNextSide === 'BLUE' ? 'RED' : 'BLUE';
+      const swapNextSides = loserNextSide !== loserSide;
+      const nextFirstPickSide: DraftSide =
+        value === 'FIRST' ? winnerNextSide : loserNextSide;
+
+      proceedToNextGame({
+        swapNextSides,
+        nextFirstPickSide,
+      });
+    } else {
+      const winnerNextSide = value as DraftSide;
+      const loserNextSide: DraftSide =
+        winnerNextSide === 'BLUE' ? 'RED' : 'BLUE';
+      const swapNextSides = loserNextSide !== loserSide;
+      const nextFirstPickSide: DraftSide =
+        nextGameRofsFirst.value === 'FIRST' ? loserNextSide : winnerNextSide;
+
+      proceedToNextGame({
+        swapNextSides,
+        nextFirstPickSide,
+      });
+    }
+  };
+
+  // 솔로 AI 모드에서 패배한 AI가 자동으로 1차 선택(진영 선택권 / RoFS 선선택권)을 행사
+  const handleAiLoserAutoSelect = () => {
+    if (!loserSide) return;
+
+    if (selectionMode !== 'ROFS') {
+      // AI는 패배 시 BLUE 진영을 선호하여 선택
+      handleLoserChooseSide('BLUE');
+      return;
+    }
+
+    // RoFS 모드: 패배한 AI가 1차 선택(선픽 또는 BLUE)을 자동 결정하고 유저에게 2차 선택권 넘김
+    const aiPicksFirstOrder = Math.random() < 0.5;
+    setNextGameRofsFirst(
+      aiPicksFirstOrder
+        ? { category: 'PICK_ORDER', value: 'FIRST' }
+        : { category: 'SIDE', value: 'BLUE' },
+    );
+  };
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-700/60 bg-emerald-950/30 px-4 py-3">
-      <div className="flex items-center gap-2 text-xs sm:text-sm">
-        <Trophy className="h-4 w-4 text-amber-400" />
-        <span className="font-semibold text-emerald-300">
-          Game {gameNumber} 밴픽 완료!
-        </span>
-        <span className="text-slate-400">
-          승리 팀을 기록하고 다음 세트를 진행하세요.
-        </span>
+    <div className="flex flex-col gap-3 rounded-xl border border-emerald-700/60 bg-emerald-950/30 px-4 py-3">
+      {/* 1단계: 승리 팀 기록 */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs sm:text-sm">
+          <Trophy className="h-4 w-4 text-amber-400" />
+          <span className="font-semibold text-emerald-300">
+            Game {gameNumber} 밴픽 완료!
+          </span>
+          <span className="text-slate-400">
+            {currentWinner
+              ? `${winnerTeamName} 승리 기록됨`
+              : '승리 팀을 먼저 선택해 주세요.'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button
+            type="button"
+            disabled={onlineSide === 'SPECTATOR'}
+            onClick={() => setCurrentWinner('BLUE')}
+            className={`rounded-md border px-3 py-1.5 font-semibold transition disabled:opacity-40 ${
+              currentWinner === 'BLUE'
+                ? 'border-sky-400 bg-sky-500 text-slate-950'
+                : 'border-sky-700/70 bg-sky-950/50 text-sky-300 hover:bg-sky-900/60'
+            }`}
+          >
+            {blueTeamName} 승
+          </button>
+          <button
+            type="button"
+            disabled={onlineSide === 'SPECTATOR'}
+            onClick={() => setCurrentWinner('RED')}
+            className={`rounded-md border px-3 py-1.5 font-semibold transition disabled:opacity-40 ${
+              currentWinner === 'RED'
+                ? 'border-rose-400 bg-rose-500 text-slate-950'
+                : 'border-rose-700/70 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60'
+            }`}
+          >
+            {redTeamName} 승
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <button
-          type="button"
-          onClick={() => setCurrentWinner('BLUE')}
-          className={`rounded-md border px-3 py-1.5 font-semibold transition ${
-            currentWinner === 'BLUE'
-              ? 'border-sky-400 bg-sky-500 text-slate-950'
-              : 'border-sky-700/70 bg-sky-950/50 text-sky-300 hover:bg-sky-900/60'
-          }`}
-        >
-          {blueTeamName} 승
-        </button>
-        <button
-          type="button"
-          onClick={() => setCurrentWinner('RED')}
-          className={`rounded-md border px-3 py-1.5 font-semibold transition ${
-            currentWinner === 'RED'
-              ? 'border-rose-400 bg-rose-500 text-slate-950'
-              : 'border-rose-700/70 bg-rose-950/50 text-rose-300 hover:bg-rose-900/60'
-          }`}
-        >
-          {redTeamName} 승
-        </button>
+      {/* 2단계: 패배팀 선택권 (수동/코인토스 -> 진영 선택권, RoFS -> RoFS 선선택권) */}
+      {hasNextGame && currentWinner && loserSide && (
+        <div className="space-y-2.5 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs">
+          {selectionMode !== 'ROFS' ? (
+            /* 수동선택 / 코인토스 모드: 패배팀 진영 선택권 */
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <p className="font-bold text-amber-300">
+                  Game {gameNumber + 1} 패배팀 진영 선택권 — {loserTeamName}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {isLoserAi
+                    ? `패배한 AI(${loserTeamName})가 다음 세트 진영을 선택합니다.`
+                    : canActAsLoser
+                      ? `${loserTeamName}이(가) 다음 세트에서 플레이할 진영을 선택하세요.`
+                      : `패배팀(${loserTeamName})이 다음 세트 진영을 선택하는 중입니다...`}
+                </p>
+              </div>
 
-        {gameNumber < maxGames && (
-          <>
-            <button
-              type="button"
-              onClick={() => proceedToNextGame(false)}
-              className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1.5 font-semibold text-slate-950 hover:bg-emerald-400"
-            >
-              <SkipForward className="h-3.5 w-3.5" />
-              Game {gameNumber + 1} 진행
-            </button>
-            <button
-              type="button"
-              onClick={() => proceedToNextGame(true)}
-              className="inline-flex items-center gap-1 rounded-md border border-emerald-500/70 bg-emerald-950/60 px-3 py-1.5 font-semibold text-emerald-300 hover:bg-emerald-900/60"
-            >
-              <ArrowLeftRight className="h-3.5 w-3.5" />
-              진영 교체 후 Game {gameNumber + 1}
-            </button>
-          </>
-        )}
-      </div>
+              {isLoserAi ? (
+                <button
+                  type="button"
+                  onClick={handleAiLoserAutoSelect}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-emerald-400"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                  AI 진영 선택 후 Game {gameNumber + 1} 시작
+                </button>
+              ) : (
+                canActAsLoser && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleLoserChooseSide('BLUE')}
+                      className="rounded-md border border-sky-400 bg-sky-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-sky-400"
+                    >
+                      BLUE 진영 선택
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLoserChooseSide('RED')}
+                      className="rounded-md border border-rose-400 bg-rose-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-rose-400"
+                    >
+                      RED 진영 선택
+                    </button>
+                  </div>
+                )
+              )}
+            </div>
+          ) : (
+            /* RoFS 모드: 패배팀 RoFS 선선택권 (진영 또는 픽순 중 1차 선택 -> 승리팀 2차 선택) */
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-bold text-amber-300">
+                    Game {gameNumber + 1} 패배팀 RoFS 선선택권 — {loserTeamName}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {!nextGameRofsFirst
+                      ? isLoserAi
+                        ? `패배한 AI(${loserTeamName})가 진영 또는 픽순 중 한 항목을 먼저 선택합니다.`
+                        : canActAsLoser
+                          ? `${loserTeamName}이(가) 진영 또는 픽순 중 한 항목을 먼저 선택하세요.`
+                          : `패배팀(${loserTeamName})의 RoFS 1차 선택을 기다리는 중...`
+                      : `${loserTeamName}이(가) [${
+                          nextGameRofsFirst.category === 'SIDE'
+                            ? `진영: ${nextGameRofsFirst.value}`
+                            : `픽순: ${
+                                nextGameRofsFirst.value === 'FIRST'
+                                  ? '선픽'
+                                  : '후픽'
+                              }`
+                        }]을(를) 선택했습니다. 이제 승리팀(${winnerTeamName})이 남은 항목을 선택합니다.`}
+                  </p>
+                </div>
+
+                {nextGameRofsFirst && canActAsLoser && !isLoserAi && (
+                  <button
+                    type="button"
+                    onClick={() => setNextGameRofsFirst(null)}
+                    className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  >
+                    <ArrowLeftRight className="h-3 w-3" />
+                    1차 선택 다시하기
+                  </button>
+                )}
+              </div>
+
+              {/* RoFS 1차 선택 (패배팀) */}
+              {!nextGameRofsFirst && (
+                <div>
+                  {isLoserAi ? (
+                    <button
+                      type="button"
+                      onClick={handleAiLoserAutoSelect}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-amber-400 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-amber-300"
+                    >
+                      AI RoFS 1차 선택 확인
+                    </button>
+                  ) : (
+                    canActAsLoser && (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <button
+                          type="button"
+                          onClick={() => handleLoserRofsFirst('SIDE', 'BLUE')}
+                          className="rounded-md border border-sky-500/70 bg-sky-950/50 py-1.5 font-bold text-sky-300 hover:bg-sky-500 hover:text-slate-950"
+                        >
+                          진영: BLUE
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleLoserRofsFirst('SIDE', 'RED')}
+                          className="rounded-md border border-rose-500/70 bg-rose-950/50 py-1.5 font-bold text-rose-300 hover:bg-rose-500 hover:text-slate-950"
+                        >
+                          진영: RED
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleLoserRofsFirst('PICK_ORDER', 'FIRST')
+                          }
+                          className="rounded-md border border-amber-500/70 bg-amber-950/50 py-1.5 font-bold text-amber-300 hover:bg-amber-400 hover:text-slate-950"
+                        >
+                          픽순: 선픽
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleLoserRofsFirst('PICK_ORDER', 'SECOND')
+                          }
+                          className="rounded-md border border-amber-500/70 bg-amber-950/50 py-1.5 font-bold text-amber-300 hover:bg-amber-400 hover:text-slate-950"
+                        >
+                          픽순: 후픽
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* RoFS 2차 선택 (승리팀) */}
+              {nextGameRofsFirst && canActAsWinner && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {nextGameRofsFirst.category === 'SIDE' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleWinnerRofsSecond('FIRST')}
+                        className="rounded-md bg-emerald-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-emerald-400"
+                      >
+                        선픽 선택 후 Game {gameNumber + 1} 시작
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleWinnerRofsSecond('SECOND')}
+                        className="rounded-md border border-emerald-500/70 bg-emerald-950/50 px-3.5 py-1.5 font-bold text-emerald-300 hover:bg-emerald-500 hover:text-slate-950"
+                      >
+                        후픽 선택 후 Game {gameNumber + 1} 시작
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleWinnerRofsSecond('BLUE')}
+                        className="rounded-md bg-sky-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-sky-400"
+                      >
+                        BLUE 진영 선택 후 Game {gameNumber + 1} 시작
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleWinnerRofsSecond('RED')}
+                        className="rounded-md bg-rose-500 px-3.5 py-1.5 font-bold text-slate-950 hover:bg-rose-400"
+                      >
+                        RED 진영 선택 후 Game {gameNumber + 1} 시작
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

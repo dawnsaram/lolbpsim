@@ -13,6 +13,7 @@ import {
 } from '@/services/ddragon';
 import {
   roomClient,
+  type NextGameRofsFirst,
   type OnlineRole,
   type RoomPeers,
   type SyncedDraftPayload,
@@ -77,6 +78,7 @@ interface DraftStoreState {
   bluePicks: string[];
   redPicks: string[];
   currentWinner: DraftSide | null;
+  nextGameRofsFirst: NextGameRofsFirst | null;
 
   // 이전 세트 기록 (다전제 히스토리 & What-if 분기)
   history: GameRecord[];
@@ -114,7 +116,11 @@ interface DraftStoreState {
   runAiTurn: () => void;
   undoLastAction: () => void;
   setCurrentWinner: (winner: DraftSide) => void;
-  proceedToNextGame: (swapNextSides?: boolean) => void;
+  setNextGameRofsFirst: (choice: NextGameRofsFirst | null) => void;
+  proceedToNextGame: (options?: {
+    swapNextSides?: boolean;
+    nextFirstPickSide?: DraftSide;
+  }) => void;
   branchFromGame: (targetGameNumber: number) => void;
   resetCurrentGame: () => void;
   resetSeries: () => void;
@@ -152,6 +158,7 @@ function buildSyncedPayload(state: DraftStoreState): SyncedDraftPayload {
   return {
     seriesFormat: state.seriesFormat,
     fearlessRule: state.fearlessRule,
+    selectionMode: state.selectionMode,
     firstPickSide: state.firstPickSide,
     blueTeamName: state.blueTeamName,
     redTeamName: state.redTeamName,
@@ -165,6 +172,7 @@ function buildSyncedPayload(state: DraftStoreState): SyncedDraftPayload {
     bluePicks: state.bluePicks,
     redPicks: state.redPicks,
     currentWinner: state.currentWinner,
+    nextGameRofsFirst: state.nextGameRofsFirst,
     history: state.history,
   };
 }
@@ -258,6 +266,7 @@ export const useDraftStore = create<DraftStoreState>()(
       bluePicks: [],
       redPicks: [],
       currentWinner: null,
+      nextGameRofsFirst: null,
       history: [],
 
       selectedRole: 'ALL',
@@ -658,11 +667,17 @@ export const useDraftStore = create<DraftStoreState>()(
       },
 
       setCurrentWinner: (currentWinner) => {
-        set({ currentWinner });
+        set({ currentWinner, nextGameRofsFirst: null });
         syncIfOnline(get);
       },
 
-      proceedToNextGame: (swapNextSides = false) => {
+      setNextGameRofsFirst: (nextGameRofsFirst) => {
+        set({ nextGameRofsFirst });
+        syncIfOnline(get);
+      },
+
+      proceedToNextGame: (options = {}) => {
+        const { swapNextSides = false, nextFirstPickSide } = options;
         const state = get();
         const maxGames = getMaxGames(state.seriesFormat);
         if (state.gameNumber >= maxGames) return;
@@ -688,13 +703,15 @@ export const useDraftStore = create<DraftStoreState>()(
           bluePicks: [],
           redPicks: [],
           currentWinner: null,
+          nextGameRofsFirst: null,
           timeLeft: state.timerDuration,
+          firstPickSide: nextFirstPickSide ?? 'BLUE',
           ...(swapNextSides
             ? {
-              blueTeamName: state.redTeamName,
-              redTeamName: state.blueTeamName,
-              userSide: state.userSide === 'BLUE' ? 'RED' : 'BLUE',
-            }
+                blueTeamName: state.redTeamName,
+                redTeamName: state.blueTeamName,
+                userSide: state.userSide === 'BLUE' ? 'RED' : 'BLUE',
+              }
             : {}),
         });
 

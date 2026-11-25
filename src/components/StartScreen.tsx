@@ -35,25 +35,25 @@ const MODE_CARDS: {
   desc: string;
   icon: typeof Swords;
 }[] = [
-  {
-    mode: 'VS_1V1',
-    title: '1:1 대전 (방 코드)',
-    desc: '방을 만들고 6자리 코드를 공유해 두 명이 실시간으로 1:1 밴픽',
-    icon: Swords,
-  },
-  {
-    mode: 'SOLO_AI',
-    title: '솔로 연습 (vs AI)',
-    desc: '피어리스 포지션 말리기 & 조합 보완 AI 감코진과 1인 연습',
-    icon: Bot,
-  },
-  {
-    mode: 'MANUAL',
-    title: '양팀 수동 조작',
-    desc: '한 화면에서 블루·레드 양쪽을 직접 조작하며 조합 연구',
-    icon: Users,
-  },
-];
+    {
+      mode: 'VS_1V1',
+      title: '1:1 대전 (방 코드)',
+      desc: '방을 만들고 6자리 코드를 공유해 두 명이 실시간으로 1:1 밴픽',
+      icon: Swords,
+    },
+    {
+      mode: 'SOLO_AI',
+      title: '솔로 연습 (vs AI)',
+      desc: '피어리스 포지션 말리기 & 조합 보완 AI 감코진과 1인 연습',
+      icon: Bot,
+    },
+    {
+      mode: 'MANUAL',
+      title: '양팀 수동 조작',
+      desc: '한 화면에서 블루·레드 양쪽을 직접 조작하며 조합 연구',
+      icon: Users,
+    },
+  ];
 
 export function StartScreen({
   onStartNew,
@@ -74,7 +74,6 @@ export function StartScreen({
     gameNumber,
     currentStepIndex,
     history,
-    champions,
     roomStatus,
     roomError,
     setSeriesFormat,
@@ -108,14 +107,13 @@ export function StartScreen({
         <div className="space-y-2 text-center">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
             <Shield className="h-3.5 w-3.5" />
-            Fearless Draft &amp; Online 1:1 Ban/Pick Simulator
+            LoL Ban/Pick Simulator
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-100 sm:text-4xl">
-            LoL 피어리스 드래프트 시뮬레이터
+            LoL 밴픽 시뮬레이터
           </h1>
           <p className="text-sm text-slate-400">
-            방 코드 기반 실시간 1:1 대전, AI 감코진 솔로 연습, 실시간 조합 분석
-            (전체 챔피언 {champions.length}종 연동)
+            방 코드 기반 실시간 1:1 대전, AI 솔로 연습, 실시간 조합 분석
           </p>
         </div>
 
@@ -137,17 +135,15 @@ export function StartScreen({
                       clearRoomError();
                       setDraftMode(mode);
                     }}
-                    className={`flex flex-col items-start gap-1.5 rounded-xl border p-3 text-left transition ${
-                      selected
-                        ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500'
-                        : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-800/50'
-                    }`}
+                    className={`flex flex-col items-start gap-1.5 rounded-xl border p-3 text-left transition ${selected
+                      ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500'
+                      : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-800/50'
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       <Icon
-                        className={`h-4 w-4 ${
-                          selected ? 'text-sky-400' : 'text-slate-400'
-                        }`}
+                        className={`h-4 w-4 ${selected ? 'text-sky-400' : 'text-slate-400'
+                          }`}
                       />
                       <span className="text-sm font-bold text-slate-100">
                         {title}
@@ -221,11 +217,10 @@ export function StartScreen({
                     key={format}
                     type="button"
                     onClick={() => setSeriesFormat(format)}
-                    className={`rounded-lg border py-2 text-xs font-bold transition ${
-                      seriesFormat === format
-                        ? 'border-sky-500 bg-sky-500 text-slate-950'
-                        : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700'
-                    }`}
+                    className={`rounded-lg border py-2 text-xs font-bold transition ${seriesFormat === format
+                      ? 'border-sky-500 bg-sky-500 text-slate-950'
+                      : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700'
+                      }`}
                   >
                     {format === 'BO1' ? '단판 (Bo1)' : format}
                   </button>
@@ -244,11 +239,10 @@ export function StartScreen({
                     type="button"
                     onClick={() => setFearlessRule(rule)}
                     title={FEARLESS_RULE_META[rule].description}
-                    className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${
-                      fearlessRule === rule
-                        ? 'border-sky-500 bg-sky-500 text-slate-950'
-                        : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700'
-                    }`}
+                    className={`rounded-lg border px-2 py-2 text-xs font-bold transition ${fearlessRule === rule
+                      ? 'border-sky-500 bg-sky-500 text-slate-950'
+                      : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700'
+                      }`}
                   >
                     {rule === 'HARD'
                       ? '하드 피어리스'
@@ -316,11 +310,10 @@ export function StartScreen({
             <button
               type="button"
               onClick={() => setTimerEnabled(!timerEnabled)}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${
-                timerEnabled
-                  ? 'border-amber-600/70 bg-amber-950/40 text-amber-300'
-                  : 'border-slate-800 bg-slate-950 text-slate-400'
-              }`}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${timerEnabled
+                ? 'border-amber-600/70 bg-amber-950/40 text-amber-300'
+                : 'border-slate-800 bg-slate-950 text-slate-400'
+                }`}
             >
               <Timer className="h-3.5 w-3.5" />
               30초 타이머 {timerEnabled ? 'ON' : 'OFF'}
