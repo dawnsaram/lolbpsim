@@ -115,6 +115,17 @@ function buildFallbackChampion(raw: DDragonChampionRaw): Champion {
       engage: clampStat(
         isTank ? 4 : isSupport ? 3 : isAssassin || isFighter ? 3 : 2,
       ),
+      dps: clampStat(
+        isMarksman
+          ? 5
+          : isMage || isFighter
+            ? 2.5 + Math.max(raw.info.attack, raw.info.magic) / 5
+            : isAssassin
+              ? 3
+              : isSupport || isTank
+                ? 1.5
+                : 3,
+      ),
       waveClear: clampStat(
         isMage ? 4 : isMarksman ? 4 : isSupport ? 1 : 3,
       ),

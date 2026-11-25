@@ -25,6 +25,8 @@ export interface ChampionStats {
   frontline: number;
   /** 이니시에이팅 (0~5) */
   engage: number;
+  /** 지속 딜량 DPS (0~5) */
+  dps?: number;
   /** 라인 클리어 (0~5) */
   waveClear: number;
   /** 사거리/포킹 (0~5) */
@@ -89,6 +91,8 @@ export interface CompFeedback {
   message: string;
 }
 
+export type CompGrade = 'S' | 'A' | 'B' | 'C' | 'D';
+
 export interface TeamCompAnalysis {
   pickCount: number;
   adCount: number;
@@ -98,6 +102,7 @@ export interface TeamCompAnalysis {
   apRatio: number;
   totalFrontline: number;
   totalEngage: number;
+  totalDps: number;
   totalWaveClear: number;
   totalRange: number;
   powerCurve: {
@@ -105,6 +110,8 @@ export interface TeamCompAnalysis {
     mid: number;
     late: number;
   };
+  overallScore: number;
+  grade: CompGrade;
   highTierUsedCount: number;
   tankUsedCount: number;
   feedbacks: CompFeedback[];

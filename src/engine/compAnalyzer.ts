@@ -1,7 +1,50 @@
-import type { Champion, CompFeedback, TeamCompAnalysis } from '@/types/draft';
+import type {
+  Champion,
+  CompFeedback,
+  CompGrade,
+  TeamCompAnalysis,
+} from '@/types/draft';
+
+const HIGH_DPS_IDS = new Set([
+  'Azir',
+  'Corki',
+  'Yone',
+  'Jax',
+  'Viego',
+  'Rumble',
+  'Taliyah',
+  'Orianna',
+  'Jayce',
+]);
 
 /**
- * 현재 팀에 픽된 챔피언 목록을 기반으로 실시간 조합 지표를 계산합니다.
+ * 챔피언의 지속 딜(DPS, 1~5) 수치를 반환합니다.
+ */
+export function getChampionDps(champ: Champion): number {
+  if (typeof champ.stats.dps === 'number') {
+    return champ.stats.dps;
+  }
+
+  if (champ.roles.includes('BOT')) return 5;
+  if (HIGH_DPS_IDS.has(champ.id)) return 4;
+  if (champ.roles.includes('SUP') && champ.stats.frontline >= 3) return 1;
+  if (champ.roles.includes('SUP')) return 2;
+  if (champ.stats.frontline >= 5) return 2;
+  if (champ.roles.includes('MID')) return 3;
+  if (champ.roles.includes('TOP') || champ.roles.includes('JGL')) return 3;
+  return 3;
+}
+
+function getCompGrade(score: number): CompGrade {
+  if (score >= 86) return 'S';
+  if (score >= 76) return 'A';
+  if (score >= 65) return 'B';
+  if (score >= 54) return 'C';
+  return 'D';
+}
+
+/**
+ * 현재 팀에 픽된 챔피언 목록을 기반으로 실시간 조합 지표 및 종합 점수를 계산합니다.
  */
 export function analyzeTeamComp(
   picks: Champion[],
@@ -17,11 +60,13 @@ export function analyzeTeamComp(
 
   let totalFrontline = 0;
   let totalEngage = 0;
+  let totalDps = 0;
   let totalWaveClear = 0;
   let totalRange = 0;
 
   let totalEarly = 0;
   let totalLate = 0;
+  let totalTierScore = 0;
 
   let highTierUsedCount = 0;
   let tankUsedCount = 0;
@@ -41,11 +86,13 @@ export function analyzeTeamComp(
 
     totalFrontline += champ.stats.frontline;
     totalEngage += champ.stats.engage;
+    totalDps += getChampionDps(champ);
     totalWaveClear += champ.stats.waveClear;
     totalRange += champ.stats.range;
 
     totalEarly += champ.stats.earlyGame;
     totalLate += champ.stats.lateGame;
+    totalTierScore += Math.max(0, Math.min(1, (5 - champ.tier) / 4));
 
     if (champ.tier <= 1.8) {
       highTierUsedCount += 1;
@@ -64,6 +111,58 @@ export function analyzeTeamComp(
   const avgLate = pickCount > 0 ? Number((totalLate / pickCount).toFixed(1)) : 0;
   const avgMid =
     pickCount > 0 ? Number(((avgEarly + avgLate) / 2).toFixed(1)) : 0;
+
+  // 종합 점수 계산 (100점 만점, 픽 수에 비례 정규화)
+  let overallScore = 0;
+  if (pickCount > 0) {
+    const scale = 5 / pickCount;
+    const normFrontline = totalFrontline * scale;
+    const normEngage = totalEngage * scale;
+    const normDps = totalDps * scale;
+    const normWaveClear = totalWaveClear * scale;
+    const normRange = totalRange * scale;
+
+    // 1) 딜 밸런스 (최대 20점)
+    let damageScore = 20;
+    if (pickCount >= 3) {
+      if ((apCount === 0 && mixedCount === 0) || (adCount === 0 && mixedCount === 0)) {
+        damageScore = 6;
+      } else if (adRatio >= 75 || apRatio >= 75) {
+        damageScore = 13;
+      } else if (adRatio >= 35 && adRatio <= 65) {
+        damageScore = 20;
+      } else {
+        damageScore = 17;
+      }
+    }
+
+    // 2) 앞라인/탱킹 (최대 18점)
+    const frontlineScore = Math.min(18, (normFrontline / 13) * 18);
+    // 3) 이니시 (최대 16점)
+    const engageScore = Math.min(16, (normEngage / 13) * 16);
+    // 4) 지속 딜 DPS (최대 18점)
+    const dpsScore = Math.min(18, (normDps / 15) * 18);
+    // 5) 라인 클리어 (최대 14점)
+    const waveClearScore = Math.min(14, (normWaveClear / 15) * 14);
+    // 6) 사거리 + 메타 티어 (최대 14점)
+    const rangeScore = Math.min(7, (normRange / 14) * 7);
+    const tierScore = (totalTierScore / pickCount) * 7;
+
+    overallScore = Math.round(
+      Math.min(
+        100,
+        damageScore +
+          frontlineScore +
+          engageScore +
+          dpsScore +
+          waveClearScore +
+          rangeScore +
+          tierScore,
+      ),
+    );
+  }
+
+  const grade = getCompGrade(overallScore);
 
   const feedbacks: CompFeedback[] = [];
 
@@ -96,7 +195,7 @@ export function analyzeTeamComp(
     }
   }
 
-  // 2. 조합 균형도 피드백
+  // 2. 조합 균형도 & DPS 피드백
   if (pickCount >= 3 && totalFrontline < 6) {
     feedbacks.push({
       level: 'warning',
@@ -110,6 +209,14 @@ export function analyzeTeamComp(
       level: 'warning',
       category: 'balance',
       message: '확정 이니시 수단 부족 — 받아치는 구도가 강제됩니다.',
+    });
+  }
+
+  if (pickCount >= 4 && totalDps < 11) {
+    feedbacks.push({
+      level: 'warning',
+      category: 'damage',
+      message: '지속 딜(DPS) 부족 — 상대 탱커 돌파 및 오브젝트 버스트가 느립니다.',
     });
   }
 
@@ -164,6 +271,7 @@ export function analyzeTeamComp(
     apRatio,
     totalFrontline,
     totalEngage,
+    totalDps,
     totalWaveClear,
     totalRange,
     powerCurve: {
@@ -171,6 +279,8 @@ export function analyzeTeamComp(
       mid: avgMid,
       late: avgLate,
     },
+    overallScore,
+    grade,
     highTierUsedCount,
     tankUsedCount,
     feedbacks,

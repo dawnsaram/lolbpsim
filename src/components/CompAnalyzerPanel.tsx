@@ -17,7 +17,14 @@ function TeamAnalysisCard({
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
       <div className="flex items-center justify-between">
-        <h3 className={`text-xs font-bold ${accentClass}`}>{title}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className={`text-xs font-bold ${accentClass}`}>{title}</h3>
+          {analysis.pickCount > 0 && (
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-300">
+              {analysis.overallScore}점 ({analysis.grade})
+            </span>
+          )}
+        </div>
         <span className="text-[11px] text-slate-400">
           AD {analysis.adRatio}% / AP {analysis.apRatio}%
         </span>
@@ -35,8 +42,14 @@ function TeamAnalysisCard({
         />
       </div>
 
-      {/* 조합 핵심 지표 */}
-      <div className="grid grid-cols-4 gap-2 text-center text-[11px]">
+      {/* 조합 핵심 지표 (DPS 포함 5개) */}
+      <div className="grid grid-cols-5 gap-1.5 text-center text-[11px]">
+        <div className="rounded bg-slate-900 p-1.5">
+          <div className="text-slate-400">DPS</div>
+          <div className="font-semibold text-amber-300">
+            {analysis.totalDps}
+          </div>
+        </div>
         <div className="rounded bg-slate-900 p-1.5">
           <div className="text-slate-400">앞라인</div>
           <div className="font-semibold text-slate-100">

@@ -3,8 +3,9 @@ import { ChampionGrid } from '@/components/ChampionGrid';
 import { CompAnalyzerPanel } from '@/components/CompAnalyzerPanel';
 import { MatchCompleteBanner, SidePanel } from '@/components/DraftBoard';
 import { Header } from '@/components/Header';
+import { PostDraftAnalysisPanel } from '@/components/PostDraftAnalysisPanel';
 import { StartScreen } from '@/components/StartScreen';
-import { getDraftOrder } from '@/constants/draftOrder';
+import { getDraftOrder, TOURNAMENT_DRAFT_ORDER } from '@/constants/draftOrder';
 import { useDraftStore } from '@/store/useDraftStore';
 
 export function App() {
@@ -117,6 +118,8 @@ export function App() {
     );
   }
 
+  const isDraftComplete = currentStepIndex >= TOURNAMENT_DRAFT_ORDER.length;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <Header
@@ -126,15 +129,15 @@ export function App() {
         }}
       />
       <main className="mx-auto flex max-w-[1440px] flex-col gap-4 p-4">
-        {/* 롤 클라이언트 스타일 3단 드래프트 아레나: 블루(좌) | 챔피언 선택(중앙) | 레드(우) */}
+        {/* 롤 클라이언트 스타일 3단 드래프트 아레나: 블루(좌) | 챔피언 선택 또는 최종 분석(중앙) | 레드(우) */}
         <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[260px_minmax(0,1fr)_260px] xl:grid-cols-[290px_minmax(0,1fr)_290px]">
           <SidePanel side="BLUE" />
-          <ChampionGrid />
+          {isDraftComplete ? <PostDraftAnalysisPanel /> : <ChampionGrid />}
           <SidePanel side="RED" />
         </div>
 
         <MatchCompleteBanner />
-        <CompAnalyzerPanel />
+        {!isDraftComplete && <CompAnalyzerPanel />}
       </main>
     </div>
   );
