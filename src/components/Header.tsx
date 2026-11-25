@@ -3,7 +3,11 @@ import {
   AI_STYLE_META,
   FEARLESS_RULE_META,
 } from '@/constants/draftOrder';
-import { getMaxGames, useDraftStore } from '@/store/useDraftStore';
+import {
+  getMaxGames,
+  getSeriesStandings,
+  useDraftStore,
+} from '@/store/useDraftStore';
 import type {
   AiStyle,
   DraftMode,
@@ -64,25 +68,13 @@ export function Header({ onGoHome }: HeaderProps) {
   const maxGames = getMaxGames(seriesFormat);
   const isOnlineRoom = draftMode === 'VS_1V1' && Boolean(roomCode);
 
-  const countWinsForTeam = (teamName: string): number => {
-    let wins = history.filter((record) => {
-      if (!record.winner) return false;
-      const winnerName =
-        record.winner === 'BLUE' ? record.blueTeamName : record.redTeamName;
-      return winnerName === teamName;
-    }).length;
-
-    if (currentWinner) {
-      const currentWinnerName =
-        currentWinner === 'BLUE' ? blueTeamName : redTeamName;
-      if (currentWinnerName === teamName) wins += 1;
-    }
-
-    return wins;
-  };
-
-  const blueScore = countWinsForTeam(blueTeamName);
-  const redScore = countWinsForTeam(redTeamName);
+  const { blueWins: blueScore, redWins: redScore } = getSeriesStandings(
+    history,
+    blueTeamName,
+    redTeamName,
+    currentWinner,
+    seriesFormat,
+  );
 
   const modeLabel =
     draftMode === 'VS_1V1'

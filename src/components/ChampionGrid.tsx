@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ALL_ROLES,
   getDraftOrder,
@@ -6,9 +7,23 @@ import {
 import { getChampionIconUrl } from '@/services/ddragon';
 import { getFearlessLockedIds, useDraftStore } from '@/store/useDraftStore';
 import { matchesChampionQuery } from '@/utils/hangul';
-import { Check, Lock, Search, Timer } from 'lucide-react';
+import { ArrowDownWideNarrow, Check, Lock, Search, Swords, Timer } from 'lucide-react';
+
+function getTierBadge(tier: number): { label: string; className: string } {
+  if (tier <= 1.5) {
+    return { label: '1T', className: 'bg-amber-400 text-slate-950' };
+  }
+  if (tier <= 2.2) {
+    return { label: '2T', className: 'bg-emerald-400 text-slate-950' };
+  }
+  if (tier <= 3.0) {
+    return { label: '3T', className: 'bg-sky-400 text-slate-950' };
+  }
+  return { label: '4T', className: 'bg-slate-700/90 text-slate-200' };
+}
 
 export function ChampionGrid() {
+  const [sortByTier, setSortByTier] = useState(false);
   const {
     champions,
     championMap,
@@ -79,16 +94,33 @@ export function ChampionGrid() {
     ...redPicks,
   ]);
 
-  const filteredChampions = champions.filter((champ) => {
-    const roleMatch =
-      selectedRole === 'ALL' || champ.roles.includes(selectedRole);
-    const queryMatch = matchesChampionQuery(
-      champ.nameKo,
-      champ.name,
-      searchQuery,
-    );
-    return roleMatch && queryMatch;
-  });
+  // 현재 시점 기준 상대방 픽 목록 (카운터 표시용)
+  const myPerspectiveSide =
+    draftMode === 'SOLO_AI'
+      ? userSide
+      : isOnlineRoom && (onlineSide === 'BLUE' || onlineSide === 'RED')
+        ? onlineSide
+        : currentStep?.side ?? 'BLUE';
+  const enemyPickIds = myPerspectiveSide === 'BLUE' ? redPicks : bluePicks;
+  const enemyPickSet = new Set(enemyPickIds);
+
+  const filteredChampions = champions
+    .filter((champ) => {
+      const roleMatch =
+        selectedRole === 'ALL' || champ.roles.includes(selectedRole);
+      const queryMatch = matchesChampionQuery(
+        champ.nameKo,
+        champ.name,
+        searchQuery,
+      );
+      return roleMatch && queryMatch;
+    })
+    .sort((a, b) => {
+      if (sortByTier) {
+        if (a.tier !== b.tier) return a.tier - b.tier;
+      }
+      return a.nameKo.localeCompare(b.nameKo, 'ko');
+    });
 
   const timerRatio = Math.max(
     0,
@@ -198,15 +230,31 @@ export function ChampionGrid() {
           ))}
         </div>
 
-        <div className="relative min-w-[170px] flex-1 sm:max-w-[220px]">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="검색 (초성: ㄹㅅ, ㅋㅅㅌ)"
-            className="w-full rounded-md border border-slate-700 bg-slate-950 py-1 pl-8 pr-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-          />
+        <div className="flex flex-1 items-center justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={() => setSortByTier((prev) => !prev)}
+            title="티어순 / 가나다순 정렬 전환"
+            className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+              sortByTier
+                ? 'border-amber-400/70 bg-amber-400/15 text-amber-300'
+                : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <ArrowDownWideNarrow className="h-3 w-3" />
+            {sortByTier ? '티어순' : '가나다순'}
+          </button>
+
+          <div className="relative min-w-[150px] flex-1 sm:max-w-[200px]">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="검색 (초성: ㄹㅅ, ㅋㅅㅌ)"
+              className="w-full rounded-md border border-slate-700 bg-slate-950 py-1 pl-8 pr-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -222,6 +270,15 @@ export function ChampionGrid() {
             isFearlessLocked ||
             isCurrentUsed;
 
+          const tierBadge = getTierBadge(champ.tier);
+          const counteredEnemies =
+            !isFearlessLocked && !isCurrentUsed
+              ? champ.counters
+                  .filter((id) => enemyPickSet.has(id))
+                  .map((id) => championMap[id]?.nameKo ?? id)
+              : [];
+          const isCounter = counteredEnemies.length > 0;
+
           return (
             <button
               key={champ.id}
@@ -229,7 +286,9 @@ export function ChampionGrid() {
               disabled={disabled}
               onClick={() => hoverChampion(champ.id)}
               onDoubleClick={() => selectChampion(champ.id)}
-              title={`${champ.nameKo} (${champ.roles.join('/')}) — 클릭: 임시 선택 / 더블클릭: 즉시 확정`}
+              title={`${champ.nameKo} (${champ.roles.join('/')} · ${tierBadge.label} ${champ.tier.toFixed(1)})${
+                isCounter ? ` · 카운터: ${counteredEnemies.join(', ')}` : ''
+              } — 클릭: 임시 선택 / 더블클릭: 즉시 확정`}
               className={`group relative flex flex-col items-center gap-0.5 rounded-md border p-1 text-center transition ${
                 isFearlessLocked
                   ? 'border-amber-900/60 bg-slate-950/90 opacity-45'
@@ -237,7 +296,9 @@ export function ChampionGrid() {
                     ? 'border-slate-800 bg-slate-950/90 opacity-35'
                     : isHovered
                       ? 'border-amber-400 bg-amber-950/30 ring-1 ring-amber-400'
-                      : 'border-slate-800 bg-slate-950/60 hover:border-sky-500 hover:bg-slate-800/80'
+                      : isCounter
+                        ? 'border-emerald-500/70 bg-emerald-950/20 hover:border-emerald-400 hover:bg-emerald-950/40'
+                        : 'border-slate-800 bg-slate-950/60 hover:border-sky-500 hover:bg-slate-800/80'
               }`}
             >
               <div className="relative aspect-square w-full max-w-[52px] overflow-hidden rounded bg-slate-900">
@@ -249,6 +310,24 @@ export function ChampionGrid() {
                     isFearlessLocked || isCurrentUsed ? 'grayscale' : ''
                   }`}
                 />
+
+                {/* 좌상단 티어 배지 */}
+                {!isFearlessLocked && !isCurrentUsed && (
+                  <span
+                    className={`absolute left-0 top-0 rounded-br px-1 py-[1px] text-[8px] font-black leading-none shadow ${tierBadge.className}`}
+                  >
+                    {tierBadge.label}
+                  </span>
+                )}
+
+                {/* 하단 상대 픽 카운터 배지 */}
+                {isCounter && (
+                  <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-emerald-500/95 py-[1px] text-[8px] font-extrabold leading-none text-slate-950">
+                    <Swords className="h-2.5 w-2.5" />
+                    카운터
+                  </span>
+                )}
+
                 {isFearlessLocked && (
                   <span className="absolute inset-0 flex items-center justify-center bg-slate-950/60 text-amber-400">
                     <Lock className="h-3.5 w-3.5" />

@@ -40,9 +40,11 @@ const DEFAULT_PEERS: RoomPeers = {
 };
 
 interface DraftStoreState {
-  // 챔피언 풀 (DDragon 전체 챔피언 병합)
+  // 챔피언 풀 (DDragon 전체 챔피언 병합 + 유저 커스텀 티어 적용)
+  baseChampions: Champion[];
   champions: Champion[];
   championMap: Record<string, Champion>;
+  customTiers: Record<string, number>;
   ddragonVersion: string;
   isLoadingChampions: boolean;
 
@@ -89,6 +91,9 @@ interface DraftStoreState {
 
   // Actions
   loadAllChampions: () => Promise<void>;
+  setCustomTier: (championId: string, tier: number) => void;
+  clearCustomTier: (championId: string) => void;
+  resetAllCustomTiers: () => void;
   createOnlineRoom: (hostSide?: DraftSide) => Promise<boolean>;
   joinOnlineRoom: (roomCode: string) => Promise<boolean>;
   leaveOnlineRoom: () => void;
@@ -132,6 +137,66 @@ export function getMaxGames(format: SeriesFormat): number {
   return 5;
 }
 
+export function getWinsNeeded(format: SeriesFormat): number {
+  return Math.ceil(getMaxGames(format) / 2);
+}
+
+export function getSeriesStandings(
+  history: GameRecord[],
+  blueTeamName: string,
+  redTeamName: string,
+  currentWinner: DraftSide | null,
+  seriesFormat: SeriesFormat,
+): {
+  blueWins: number;
+  redWins: number;
+  winsNeeded: number;
+  seriesWinnerTeam: string | null;
+  seriesWinnerSide: DraftSide | null;
+  isSeriesOver: boolean;
+} {
+  const countWins = (teamName: string): number => {
+    let wins = history.filter((record) => {
+      if (!record.winner) return false;
+      const winnerName =
+        record.winner === 'BLUE' ? record.blueTeamName : record.redTeamName;
+      return winnerName === teamName;
+    }).length;
+
+    if (currentWinner) {
+      const currentWinnerName =
+        currentWinner === 'BLUE' ? blueTeamName : redTeamName;
+      if (currentWinnerName === teamName) wins += 1;
+    }
+
+    return wins;
+  };
+
+  const blueWins = countWins(blueTeamName);
+  const redWins = countWins(redTeamName);
+  const winsNeeded = getWinsNeeded(seriesFormat);
+
+  let seriesWinnerTeam: string | null = null;
+  let seriesWinnerSide: DraftSide | null = null;
+
+  if (blueWins >= winsNeeded) {
+    seriesWinnerTeam = blueTeamName;
+    seriesWinnerSide = 'BLUE';
+  } else if (redWins >= winsNeeded) {
+    seriesWinnerTeam = redTeamName;
+    seriesWinnerSide = 'RED';
+  }
+
+  return {
+    blueWins,
+    redWins,
+    winsNeeded,
+    seriesWinnerTeam,
+    seriesWinnerSide,
+    isSeriesOver: seriesWinnerSide !== null,
+  };
+}
+
 export function getFearlessLockedIds(
   history: GameRecord[],
   fearlessRule: FearlessRule,
@@ -152,6 +217,18 @@ export function getFearlessLockedIds(
   }
 
   return locked;
+}
+
+function applyCustomTiers(
+  baseChampions: Champion[],
+  customTiers: Record<string, number>,
+): Champion[] {
+  if (Object.keys(customTiers).length === 0) return baseChampions;
+  return baseChampions.map((champ) => {
+    const override = customTiers[champ.id];
+    if (typeof override !== 'number') return champ;
+    return { ...champ, tier: override };
+  });
 }
 
 function buildSyncedPayload(state: DraftStoreState): SyncedDraftPayload {
@@ -233,8 +310,10 @@ function syncIfOnline(get: () => DraftStoreState) {
 export const useDraftStore = create<DraftStoreState>()(
   persist(
     (set, get) => ({
+      baseChampions: CURATED_CHAMPIONS,
       champions: CURATED_CHAMPIONS,
       championMap: buildChampionMap(CURATED_CHAMPIONS),
+      customTiers: {},
       ddragonVersion: getDDragonVersion(),
       isLoadingChampions: false,
 
@@ -274,13 +353,46 @@ export const useDraftStore = create<DraftStoreState>()(
 
       loadAllChampions: async () => {
         set({ isLoadingChampions: true });
-        const { version, champions } =
+        const { version, champions: fetchedBase } =
           await fetchAllChampionsMerged(CURATED_CHAMPIONS);
+        const merged = applyCustomTiers(fetchedBase, get().customTiers);
         set({
           ddragonVersion: version,
-          champions,
-          championMap: buildChampionMap(champions),
+          baseChampions: fetchedBase,
+          champions: merged,
+          championMap: buildChampionMap(merged),
           isLoadingChampions: false,
+        });
+      },
+
+      setCustomTier: (championId, tier) => {
+        const clamped = Number(Math.max(1.0, Math.min(5.0, tier)).toFixed(1));
+        const nextCustomTiers = { ...get().customTiers, [championId]: clamped };
+        const merged = applyCustomTiers(get().baseChampions, nextCustomTiers);
+        set({
+          customTiers: nextCustomTiers,
+          champions: merged,
+          championMap: buildChampionMap(merged),
+        });
+      },
+
+      clearCustomTier: (championId) => {
+        const nextCustomTiers = { ...get().customTiers };
+        delete nextCustomTiers[championId];
+        const merged = applyCustomTiers(get().baseChampions, nextCustomTiers);
+        set({
+          customTiers: nextCustomTiers,
+          champions: merged,
+          championMap: buildChampionMap(merged),
+        });
+      },
+
+      resetAllCustomTiers: () => {
+        const base = get().baseChampions;
+        set({
+          customTiers: {},
+          champions: base,
+          championMap: buildChampionMap(base),
         });
       },
 
@@ -680,7 +792,14 @@ export const useDraftStore = create<DraftStoreState>()(
         const { swapNextSides = false, nextFirstPickSide } = options;
         const state = get();
         const maxGames = getMaxGames(state.seriesFormat);
-        if (state.gameNumber >= maxGames) return;
+        const standings = getSeriesStandings(
+          state.history,
+          state.blueTeamName,
+          state.redTeamName,
+          state.currentWinner,
+          state.seriesFormat,
+        );
+        if (state.gameNumber >= maxGames || standings.isSeriesOver) return;
 
         const record: GameRecord = {
           gameNumber: state.gameNumber,
@@ -774,6 +893,7 @@ export const useDraftStore = create<DraftStoreState>()(
     {
       name: 'lol-fearless-draft-sim-v2',
       partialize: (state) => ({
+        customTiers: state.customTiers,
         seriesFormat: state.seriesFormat,
         fearlessRule: state.fearlessRule,
         draftMode: state.draftMode,

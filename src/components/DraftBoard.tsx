@@ -6,9 +6,19 @@ import {
   TOURNAMENT_DRAFT_ORDER,
 } from '@/constants/draftOrder';
 import { getChampionIconUrl } from '@/services/ddragon';
-import { getMaxGames, useDraftStore } from '@/store/useDraftStore';
+import {
+  getMaxGames,
+  getSeriesStandings,
+  useDraftStore,
+} from '@/store/useDraftStore';
 import type { DraftSide } from '@/types/draft';
-import { ArrowLeftRight, ArrowUpDown, SkipForward, Trophy } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  ArrowUpDown,
+  RotateCcw,
+  SkipForward,
+  Trophy,
+} from 'lucide-react';
 
 interface SidePanelProps {
   side: DraftSide;
@@ -293,16 +303,25 @@ export function MatchCompleteBanner() {
     redTeamName,
     currentWinner,
     nextGameRofsFirst,
+    history,
     setCurrentWinner,
     setNextGameRofsFirst,
     proceedToNextGame,
+    resetSeries,
   } = useDraftStore();
 
   const isDraftComplete = currentStepIndex >= TOURNAMENT_DRAFT_ORDER.length;
   if (!isDraftComplete) return null;
 
   const maxGames = getMaxGames(seriesFormat);
-  const hasNextGame = gameNumber < maxGames;
+  const standings = getSeriesStandings(
+    history,
+    blueTeamName,
+    redTeamName,
+    currentWinner,
+    seriesFormat,
+  );
+  const hasNextGame = gameNumber < maxGames && !standings.isSeriesOver;
   const isOnlineRoom = draftMode === 'VS_1V1' && Boolean(roomCode);
 
   const loserSide: DraftSide | null = currentWinner
@@ -463,6 +482,33 @@ export function MatchCompleteBanner() {
           </button>
         </div>
       </div>
+
+      {/* 시리즈 종료 배너 (Bo1 1승 / Bo3 2승 / Bo5 3승 선취 시) */}
+      {standings.isSeriesOver && standings.seriesWinnerTeam && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/60 bg-amber-950/30 px-3.5 py-2.5 text-xs">
+          <div className="flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-amber-400" />
+            <span className="font-extrabold text-amber-300">
+              {seriesFormat} 시리즈 종료!
+            </span>
+            <span className="font-semibold text-slate-100">
+              {standings.seriesWinnerTeam} 최종 승리 ({standings.blueWins} :{' '}
+              {standings.redWins})
+            </span>
+          </div>
+
+          {onlineSide !== 'SPECTATOR' && (
+            <button
+              type="button"
+              onClick={resetSeries}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-400 px-3.5 py-1.5 font-extrabold text-slate-950 transition hover:bg-amber-300"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              새 시리즈 시작
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 2단계: 패배팀 선택권 (수동/코인토스 -> 진영 선택권, RoFS -> RoFS 선선택권) */}
       {hasNextGame && currentWinner && loserSide && (

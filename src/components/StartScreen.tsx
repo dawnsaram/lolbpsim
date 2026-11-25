@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { SidePickSelector } from '@/components/SidePickSelector';
+import { TierEditorModal } from '@/components/TierEditorModal';
 import {
   AI_STYLE_META,
   FEARLESS_RULE_META,
@@ -18,6 +19,7 @@ import {
   Play,
   RotateCcw,
   Shield,
+  Sliders,
   Swords,
   Timer,
   Users,
@@ -61,6 +63,7 @@ export function StartScreen({
   onEnterRoom,
 }: StartScreenProps) {
   const [joinCode, setJoinCode] = useState('');
+  const [tierEditorOpen, setTierEditorOpen] = useState(false);
 
   const {
     seriesFormat,
@@ -74,6 +77,7 @@ export function StartScreen({
     gameNumber,
     currentStepIndex,
     history,
+    customTiers,
     roomStatus,
     roomError,
     setSeriesFormat,
@@ -89,6 +93,7 @@ export function StartScreen({
 
   const hasSavedProgress = currentStepIndex > 0 || history.length > 0;
   const isConnecting = roomStatus === 'CONNECTING';
+  const customTierCount = Object.keys(customTiers).length;
 
   const handleCreateRoom = async () => {
     const ok = await createOnlineRoom(userSide);
@@ -357,7 +362,28 @@ export function StartScreen({
             )}
           </div>
         </div>
+
+        {/* 하단 유틸리티 링크: 챔피언 티어 커스텀 설정 */}
+        <div className="flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => setTierEditorOpen(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 underline-offset-4 transition hover:text-sky-300 hover:underline"
+          >
+            <Sliders className="h-3.5 w-3.5" />
+            <span>챔피언 티어 커스텀 설정</span>
+            {customTierCount > 0 && (
+              <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 no-underline">
+                {customTierCount}개 적용 중
+              </span>
+            )}
+          </button>
+        </div>
       </div>
+
+      {tierEditorOpen && (
+        <TierEditorModal onClose={() => setTierEditorOpen(false)} />
+      )}
     </div>
   );
 }
