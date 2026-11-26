@@ -1,4 +1,3 @@
-import Peer, { type DataConnection, type PeerOptions } from 'peerjs';
 import type {
   DraftSide,
   FearlessRule,
@@ -65,19 +64,19 @@ export type ServerMessage =
 type MessageHandler = (msg: ServerMessage) => void;
 type CloseHandler = () => void;
 
-const PEER_PREFIX = 'lolbpsim-v1-';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const TOPIC_PREFIX = 'lolbpsim/v1/room/';
 
-const PEER_OPTIONS: PeerOptions = {
-  debug: 0,
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-    ],
-  },
-};
+/**
+ * 공개 TLS WebSocket MQTT 릴레이 브로커 목록 (NAT/방화벽 영향 없이 서로 다른 PC 간 100% 연결)
+ */
+const MQTT_BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+];
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 function generateRoomCode(): string {
   let code = '';
@@ -87,23 +86,122 @@ function generateRoomCode(): string {
   return code;
 }
 
+function generateClientId(): string {
+  return `lolbp_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
+function encodeRemainingLength(length: number): number[] {
+  const bytes: number[] = [];
+  let x = length;
+  do {
+    let digit = x % 128;
+    x = Math.floor(x / 128);
+    if (x > 0) digit |= 0x80;
+    bytes.push(digit);
+  } while (x > 0);
+  return bytes;
+}
+
+function encodeUtf8Field(str: string): Uint8Array {
+  const data = encoder.encode(str);
+  const out = new Uint8Array(2 + data.length);
+  out[0] = (data.length >> 8) & 0xff;
+  out[1] = data.length & 0xff;
+  out.set(data, 2);
+  return out;
+}
+
+function concatBytes(...chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function buildMqttConnectPacket(clientId: string): Uint8Array {
+  const variableHeader = new Uint8Array([
+    0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, // "MQTT"
+    0x04, // Protocol Level 4 (3.1.1)
+    0x02, // Clean Session
+    0x00, 0x1e, // Keep Alive = 30s
+  ]);
+  const payload = encodeUtf8Field(clientId);
+  const remaining = encodeRemainingLength(
+    variableHeader.length + payload.length,
+  );
+  return concatBytes(
+    new Uint8Array([0x10, ...remaining]),
+    variableHeader,
+    payload,
+  );
+}
+
+function buildMqttSubscribePacket(packetId: number, topic: string): Uint8Array {
+  const variableHeader = new Uint8Array([
+    (packetId >> 8) & 0xff,
+    packetId & 0xff,
+  ]);
+  const topicField = encodeUtf8Field(topic);
+  const qosByte = new Uint8Array([0x00]);
+  const remaining = encodeRemainingLength(
+    variableHeader.length + topicField.length + qosByte.length,
+  );
+  return concatBytes(
+    new Uint8Array([0x82, ...remaining]),
+    variableHeader,
+    topicField,
+    qosByte,
+  );
+}
+
+function buildMqttPublishPacket(topic: string, message: string): Uint8Array {
+  const topicField = encodeUtf8Field(topic);
+  const payload = encoder.encode(message);
+  const remaining = encodeRemainingLength(topicField.length + payload.length);
+  return concatBytes(
+    new Uint8Array([0x30, ...remaining]),
+    topicField,
+    payload,
+  );
+}
+
+function buildMqttPingPacket(): Uint8Array {
+  return new Uint8Array([0xc0, 0x00]);
+}
+
+interface RelayEnvelope {
+  senderId: string;
+  targetId?: string;
+  type: string;
+  roomCode?: string;
+  assignedSide?: OnlineRole;
+  state?: SyncedDraftPayload | null;
+  peers?: RoomPeers;
+}
+
 /**
- * PeerJS (WebRTC P2P) 기반 서버리스 방 통신 클라이언트.
- * GitHub Pages 같은 정적 호스팅에서도 별도 백엔드 없이 6자리 방 코드 1:1 대전이 동작합니다.
+ * 순수 브라우저 MQTT-over-WSS 릴레이 기반 방 통신 클라이언트.
+ * WebRTC(NAT/방화벽) 제약을 받지 않아 GitHub Pages에서도 서로 다른 PC/네트워크 간
+ * 6자리 방 코드 1:1 대전이 안정적으로 동작합니다.
  */
 class RoomClient {
-  private peer: Peer | null = null;
+  private ws: WebSocket | null = null;
+  private pingInterval: number | null = null;
+  private clientId = generateClientId();
+  private topic: string | null = null;
+
   private isHost = false;
   private hostSide: DraftSide = 'BLUE';
   private latestState: SyncedDraftPayload | null = null;
 
-  // Host 전용 연결 관리
-  private guestConn: DataConnection | null = null;
+  // Host 전용 참가자 관리
+  private guestId: string | null = null;
   private guestSide: DraftSide | null = null;
-  private spectatorConns = new Set<DataConnection>();
-
-  // Guest 전용 연결 관리
-  private hostConn: DataConnection | null = null;
+  private spectatorIds = new Set<string>();
 
   private messageHandlers = new Set<MessageHandler>();
   private closeHandlers = new Set<CloseHandler>();
@@ -120,42 +218,34 @@ class RoomClient {
     if (!this.isHost) {
       return { blueConnected: false, redConnected: false, spectatorCount: 0 };
     }
-    const hasGuest = Boolean(this.guestConn && this.guestConn.open);
+    const hasGuest = Boolean(this.guestId);
     return {
       blueConnected:
         this.hostSide === 'BLUE' || (hasGuest && this.guestSide === 'BLUE'),
       redConnected:
         this.hostSide === 'RED' || (hasGuest && this.guestSide === 'RED'),
-      spectatorCount: this.spectatorConns.size,
+      spectatorCount: this.spectatorIds.size,
     };
   }
 
-  private broadcastFromHost(
-    msg: ServerMessage,
-    excludeConn?: DataConnection,
-  ): void {
-    const targets: DataConnection[] = [];
-    if (this.guestConn && this.guestConn.open) targets.push(this.guestConn);
-    this.spectatorConns.forEach((conn) => {
-      if (conn.open) targets.push(conn);
-    });
-
-    for (const conn of targets) {
-      if (conn !== excludeConn) {
-        conn.send(msg);
-      }
+  private publish(envelope: Omit<RelayEnvelope, 'senderId'>): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.topic) {
+      return;
     }
+    const full: RelayEnvelope = { ...envelope, senderId: this.clientId };
+    this.ws.send(buildMqttPublishPacket(this.topic, JSON.stringify(full)));
   }
 
   private handleHostSwapSides(): void {
     if (!this.isHost) return;
     this.hostSide = this.hostSide === 'BLUE' ? 'RED' : 'BLUE';
-    if (this.guestConn && this.guestConn.open) {
+    if (this.guestId) {
       this.guestSide = this.hostSide === 'BLUE' ? 'RED' : 'BLUE';
-      this.guestConn.send({
+      this.publish({
         type: 'SIDE_ASSIGNED',
+        targetId: this.guestId,
         assignedSide: this.guestSide,
-      } satisfies ServerMessage);
+      });
     }
 
     this.emitMessage({
@@ -165,7 +255,140 @@ class RoomClient {
 
     const peers = this.getPeersSummary();
     this.emitMessage({ type: 'PEERS_UPDATED', peers });
-    this.broadcastFromHost({ type: 'PEERS_UPDATED', peers });
+    this.publish({ type: 'PEERS_UPDATED', peers });
+  }
+
+  private connectMqttBroker(
+    topic: string,
+    onSubscribed: () => void,
+    onEnvelope: (env: RelayEnvelope) => void,
+    onFail: (message: string) => void,
+    brokerIndex = 0,
+  ): void {
+    if (brokerIndex >= MQTT_BROKERS.length) {
+      onFail(
+        '릴레이 서버에 연결할 수 없습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.',
+      );
+      return;
+    }
+
+    const url = MQTT_BROKERS[brokerIndex];
+    const ws = new WebSocket(url, 'mqtt');
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    this.topic = topic;
+
+    let subscribed = false;
+    let movedToFallback = false;
+
+    const tryNextBroker = () => {
+      if (movedToFallback || subscribed) return;
+      movedToFallback = true;
+      window.clearTimeout(connectTimer);
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      this.connectMqttBroker(
+        topic,
+        onSubscribed,
+        onEnvelope,
+        onFail,
+        brokerIndex + 1,
+      );
+    };
+
+    const connectTimer = window.setTimeout(() => {
+      tryNextBroker();
+    }, 5000);
+
+    ws.onopen = () => {
+      ws.send(buildMqttConnectPacket(this.clientId));
+    };
+
+    ws.onmessage = (event) => {
+      if (!(event.data instanceof ArrayBuffer)) return;
+      const buf = new Uint8Array(event.data);
+      let pos = 0;
+
+      while (pos < buf.length) {
+        const header = buf[pos];
+        const packetType = header & 0xf0;
+
+        let multiplier = 1;
+        let remainingLength = 0;
+        let lenPos = pos + 1;
+
+        while (lenPos < buf.length) {
+          const digit = buf[lenPos];
+          lenPos += 1;
+          remainingLength += (digit & 0x7f) * multiplier;
+          if ((digit & 0x80) === 0) break;
+          multiplier *= 128;
+        }
+
+        const bodyStart = lenPos;
+        const bodyEnd = bodyStart + remainingLength;
+        if (bodyEnd > buf.length) break;
+
+        if (packetType === 0x20) {
+          // CONNACK -> 구독 요청
+          ws.send(buildMqttSubscribePacket(1, topic));
+        } else if (packetType === 0x90) {
+          // SUBACK -> 방 준비 완료
+          if (!subscribed) {
+            subscribed = true;
+            window.clearTimeout(connectTimer);
+            this.pingInterval = window.setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(buildMqttPingPacket());
+              }
+            }, 20000);
+            onSubscribed();
+          }
+        } else if (packetType === 0x30) {
+          // PUBLISH
+          const body = buf.subarray(bodyStart, bodyEnd);
+          if (body.length >= 2) {
+            const topicLen = (body[0] << 8) | body[1];
+            const qos = (header >> 1) & 0x03;
+            const payloadStart = 2 + topicLen + (qos > 0 ? 2 : 0);
+            if (payloadStart <= body.length) {
+              const rawText = decoder.decode(body.subarray(payloadStart));
+              try {
+                const env = JSON.parse(rawText) as RelayEnvelope;
+                if (env && env.senderId !== this.clientId) {
+                  onEnvelope(env);
+                }
+              } catch {
+                // ignore malformed json
+              }
+            }
+          }
+        }
+
+        pos = bodyEnd;
+      }
+    };
+
+    ws.onerror = () => {
+      if (!subscribed) {
+        tryNextBroker();
+      }
+    };
+
+    ws.onclose = () => {
+      window.clearTimeout(connectTimer);
+      if (!subscribed) {
+        tryNextBroker();
+        return;
+      }
+      if (this.ws === ws) {
+        this.cleanupInternal();
+        this.emitClose();
+      }
+    };
   }
 
   connect(): Promise<void> {
@@ -210,18 +433,16 @@ class RoomClient {
       const state = payload.state as SyncedDraftPayload;
       if (this.isHost) {
         this.latestState = state;
-        this.broadcastFromHost({ type: 'STATE_UPDATED', state });
-      } else if (this.hostConn && this.hostConn.open) {
-        this.hostConn.send({ type: 'SYNC_STATE', state });
       }
+      this.publish({ type: 'STATE_UPDATED', state });
       return;
     }
 
     if (type === 'SWAP_ROOM_SIDES') {
       if (this.isHost) {
         this.handleHostSwapSides();
-      } else if (this.hostConn && this.hostConn.open) {
-        this.hostConn.send({ type: 'SWAP_ROOM_SIDES' });
+      } else {
+        this.publish({ type: 'SWAP_ROOM_SIDES' });
       }
     }
   }
@@ -233,214 +454,200 @@ class RoomClient {
     this.cleanupInternal();
 
     const code = generateRoomCode();
+    this.clientId = generateClientId();
     this.isHost = true;
     this.hostSide = hostSide;
     this.latestState = initialState;
 
-    const peer = new Peer(`${PEER_PREFIX}${code}`, PEER_OPTIONS);
-    this.peer = peer;
+    const topic = `${TOPIC_PREFIX}${code}`;
 
-    let opened = false;
-    const timeout = window.setTimeout(() => {
-      if (!opened) {
-        this.cleanupInternal();
+    this.connectMqttBroker(
+      topic,
+      () => {
         this.emitMessage({
-          type: 'ERROR',
-          message:
-            'P2P 시그널링 서버 연결 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.',
+          type: 'ROOM_CREATED',
+          roomCode: code,
+          assignedSide: this.hostSide,
+          state: this.latestState,
+          peers: this.getPeersSummary(),
         });
-      }
-    }, 10000);
+      },
+      (env) => {
+        if (env.type === 'HELLO_JOIN') {
+          let assignedSide: OnlineRole;
+          if (this.guestId === env.senderId && this.guestSide) {
+            assignedSide = this.guestSide;
+          } else if (!this.guestId) {
+            this.guestId = env.senderId;
+            this.guestSide = this.hostSide === 'BLUE' ? 'RED' : 'BLUE';
+            assignedSide = this.guestSide;
+          } else {
+            this.spectatorIds.add(env.senderId);
+            assignedSide = 'SPECTATOR';
+          }
 
-    peer.on('open', () => {
-      opened = true;
-      window.clearTimeout(timeout);
-      this.emitMessage({
-        type: 'ROOM_CREATED',
-        roomCode: code,
-        assignedSide: this.hostSide,
-        state: this.latestState,
-        peers: this.getPeersSummary(),
-      });
-    });
-
-    peer.on('connection', (conn) => {
-      const registerGuestAndReply = () => {
-        let assignedSide: OnlineRole;
-
-        if (this.guestConn === conn && this.guestSide) {
-          assignedSide = this.guestSide;
-        } else if (!this.guestConn || !this.guestConn.open) {
-          this.guestConn = conn;
-          this.guestSide = this.hostSide === 'BLUE' ? 'RED' : 'BLUE';
-          assignedSide = this.guestSide;
-        } else {
-          this.spectatorConns.add(conn);
-          assignedSide = 'SPECTATOR';
-        }
-
-        const peers = this.getPeersSummary();
-        if (conn.open) {
-          conn.send({
+          const peers = this.getPeersSummary();
+          this.publish({
             type: 'ROOM_JOINED',
+            targetId: env.senderId,
             roomCode: code,
             assignedSide,
             state: this.latestState,
             peers,
-          } satisfies ServerMessage);
-        }
-
-        this.emitMessage({ type: 'PEERS_UPDATED', peers });
-        this.broadcastFromHost({ type: 'PEERS_UPDATED', peers }, conn);
-      };
-
-      conn.on('data', (raw) => {
-        const msg = raw as Record<string, unknown>;
-        if (!msg || typeof msg !== 'object') return;
-
-        if (msg.type === 'HELLO_JOIN') {
-          registerGuestAndReply();
+          });
+          this.emitMessage({ type: 'PEERS_UPDATED', peers });
+          this.publish({ type: 'PEERS_UPDATED', peers });
           return;
         }
 
-        if (msg.type === 'SYNC_STATE' && msg.state) {
-          const nextState = msg.state as SyncedDraftPayload;
-          this.latestState = nextState;
-          this.emitMessage({ type: 'STATE_UPDATED', state: nextState });
-          this.broadcastFromHost(
-            { type: 'STATE_UPDATED', state: nextState },
-            conn,
-          );
-        } else if (msg.type === 'SWAP_ROOM_SIDES') {
+        if (env.type === 'STATE_UPDATED' && env.state) {
+          this.latestState = env.state;
+          this.emitMessage({ type: 'STATE_UPDATED', state: env.state });
+          return;
+        }
+
+        if (env.type === 'SWAP_ROOM_SIDES') {
           this.handleHostSwapSides();
+          return;
         }
-      });
 
-      conn.on('close', () => {
-        if (this.guestConn === conn) {
-          this.guestConn = null;
-          this.guestSide = null;
+        if (env.type === 'LEAVE_ROOM') {
+          if (this.guestId === env.senderId) {
+            this.guestId = null;
+            this.guestSide = null;
+          }
+          this.spectatorIds.delete(env.senderId);
+          const peers = this.getPeersSummary();
+          this.emitMessage({ type: 'PEERS_UPDATED', peers });
+          this.publish({ type: 'PEERS_UPDATED', peers });
         }
-        this.spectatorConns.delete(conn);
-        const peers = this.getPeersSummary();
-        this.emitMessage({ type: 'PEERS_UPDATED', peers });
-        this.broadcastFromHost({ type: 'PEERS_UPDATED', peers });
-      });
-    });
-
-    peer.on('error', (err) => {
-      window.clearTimeout(timeout);
-      if (!opened) {
+      },
+      (message) => {
         this.cleanupInternal();
-        this.emitMessage({
-          type: 'ERROR',
-          message: `방 생성 중 오류가 발생했습니다. (${err.type || 'network'})`,
-        });
-      }
-    });
+        this.emitMessage({ type: 'ERROR', message });
+      },
+    );
   }
 
   private joinHostRoom(roomCode: string): void {
     this.cleanupInternal();
 
+    this.clientId = generateClientId();
     this.isHost = false;
 
-    const peer = new Peer(PEER_OPTIONS);
-    this.peer = peer;
-
+    const topic = `${TOPIC_PREFIX}${roomCode}`;
     let settled = false;
     let retryTimer: number | null = null;
+    let joinTimeout: number | null = null;
+
+    const clearTimers = () => {
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      if (joinTimeout !== null) {
+        window.clearTimeout(joinTimeout);
+        joinTimeout = null;
+      }
+    };
 
     const failJoin = (message: string) => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timeout);
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      clearTimers();
       this.cleanupInternal();
       this.emitMessage({ type: 'ERROR', message });
     };
 
-    const timeout = window.setTimeout(() => {
-      failJoin(
-        `방 코드(${roomCode})에 연결할 수 없습니다. 방 코드를 다시 확인하거나 방장이 방에 있는지 확인해 주세요.`,
-      );
-    }, 12000);
+    this.connectMqttBroker(
+      topic,
+      () => {
+        this.publish({ type: 'HELLO_JOIN' });
 
-    peer.on('open', () => {
-      const conn = peer.connect(`${PEER_PREFIX}${roomCode}`, {
-        reliable: true,
-        serialization: 'json',
-      });
-      this.hostConn = conn;
-
-      const sendHello = () => {
-        if (!settled && conn.open) {
-          conn.send({ type: 'HELLO_JOIN' });
-        }
-      };
-
-      conn.on('open', () => {
-        sendHello();
-        // 혹시 첫 핸드셰이크 패킷이 지연/유실될 경우 1.5초 후 1회 재전송
         retryTimer = window.setTimeout(() => {
-          sendHello();
-        }, 1500);
-      });
+          if (!settled) {
+            this.publish({ type: 'HELLO_JOIN' });
+          }
+        }, 2000);
 
-      conn.on('data', (raw) => {
-        const msg = raw as ServerMessage;
-        if (!msg || typeof msg !== 'object') return;
-        if (msg.type === 'ROOM_JOINED') {
-          settled = true;
-          window.clearTimeout(timeout);
-          if (retryTimer !== null) window.clearTimeout(retryTimer);
-        }
-        this.emitMessage(msg);
-      });
-
-      conn.on('close', () => {
-        if (!settled) {
+        joinTimeout = window.setTimeout(() => {
           failJoin(
-            `방(${roomCode})과의 연결이 종료되었습니다. 방장이 나갔거나 네트워크가 차단되었을 수 있습니다.`,
+            `방 코드(${roomCode})를 찾을 수 없습니다. 방장이 방을 열어둔 상태인지 확인해 주세요.`,
           );
+        }, 8000);
+      },
+      (env) => {
+        if (
+          env.type === 'ROOM_JOINED' &&
+          env.targetId === this.clientId &&
+          !settled
+        ) {
+          settled = true;
+          clearTimers();
+          this.emitMessage({
+            type: 'ROOM_JOINED',
+            roomCode: env.roomCode ?? roomCode,
+            assignedSide: env.assignedSide ?? 'RED',
+            state: env.state ?? null,
+            peers: env.peers ?? {
+              blueConnected: true,
+              redConnected: true,
+              spectatorCount: 0,
+            },
+          });
           return;
         }
-        this.hostConn = null;
-        this.emitClose();
-      });
 
-      conn.on('error', () => {
-        failJoin(`방 코드(${roomCode})에 연결하는 중 오류가 발생했습니다.`);
-      });
-    });
+        if (!settled) return;
 
-    peer.on('error', (err) => {
-      const isNotFound = err.type === 'peer-unavailable';
-      failJoin(
-        isNotFound
-          ? `존재하지 않는 방 코드(${roomCode})입니다.`
-          : `방 접속에 실패했습니다. (${err.type || 'network'})`,
-      );
-    });
+        if (env.type === 'STATE_UPDATED' && env.state) {
+          this.emitMessage({ type: 'STATE_UPDATED', state: env.state });
+        } else if (env.type === 'PEERS_UPDATED' && env.peers) {
+          this.emitMessage({ type: 'PEERS_UPDATED', peers: env.peers });
+        } else if (
+          env.type === 'SIDE_ASSIGNED' &&
+          env.targetId === this.clientId &&
+          env.assignedSide
+        ) {
+          this.emitMessage({
+            type: 'SIDE_ASSIGNED',
+            assignedSide: env.assignedSide,
+          });
+        }
+      },
+      (message) => {
+        failJoin(message);
+      },
+    );
   }
 
   private cleanupInternal(): void {
-    this.guestConn?.close();
-    this.guestConn = null;
-    this.guestSide = null;
-    this.spectatorConns.forEach((c) => c.close());
-    this.spectatorConns.clear();
-    this.hostConn?.close();
-    this.hostConn = null;
-    if (this.peer) {
-      this.peer.destroy();
-      this.peer = null;
+    if (this.pingInterval !== null) {
+      window.clearInterval(this.pingInterval);
+      this.pingInterval = null;
     }
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {
+        // ignore
+      }
+      this.ws = null;
+    }
+    this.topic = null;
     this.isHost = false;
     this.latestState = null;
+    this.guestId = null;
+    this.guestSide = null;
+    this.spectatorIds.clear();
   }
 
   disconnect(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.topic) {
+      this.publish({ type: 'LEAVE_ROOM' });
+    }
     this.cleanupInternal();
     this.emitClose();
   }
