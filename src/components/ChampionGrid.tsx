@@ -7,7 +7,15 @@ import {
 import { getChampionIconUrl } from '@/services/ddragon';
 import { getFearlessLockedIds, useDraftStore } from '@/store/useDraftStore';
 import { matchesChampionQuery } from '@/utils/hangul';
-import { ArrowDownWideNarrow, Check, Lock, Search, Swords, Timer } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDownWideNarrow,
+  Check,
+  Lock,
+  Search,
+  Swords,
+  Timer,
+} from 'lucide-react';
 
 function getTierBadge(tier: number): { label: string; className: string } {
   if (tier <= 1.5) {
@@ -94,14 +102,16 @@ export function ChampionGrid() {
     ...redPicks,
   ]);
 
-  // 현재 시점 기준 상대방 픽 목록 (카운터 표시용)
+  // 현재 시점 기준 우리 팀 / 상대방 픽 목록 (카운터 & 위협 표시용)
   const myPerspectiveSide =
     draftMode === 'SOLO_AI'
       ? userSide
       : isOnlineRoom && (onlineSide === 'BLUE' || onlineSide === 'RED')
         ? onlineSide
         : currentStep?.side ?? 'BLUE';
+  const myPickIds = myPerspectiveSide === 'BLUE' ? bluePicks : redPicks;
   const enemyPickIds = myPerspectiveSide === 'BLUE' ? redPicks : bluePicks;
+  const myPickSet = new Set(myPickIds);
   const enemyPickSet = new Set(enemyPickIds);
 
   const filteredChampions = champions
@@ -271,13 +281,19 @@ export function ChampionGrid() {
             isCurrentUsed;
 
           const tierBadge = getTierBadge(champ.tier);
-          const counteredEnemies =
-            !isFearlessLocked && !isCurrentUsed
-              ? champ.counters
-                  .filter((id) => enemyPickSet.has(id))
-                  .map((id) => championMap[id]?.nameKo ?? id)
-              : [];
-          const isCounter = counteredEnemies.length > 0;
+          const isAvailable = !isFearlessLocked && !isCurrentUsed;
+          const counteredEnemies = isAvailable
+            ? champ.counters
+                .filter((id) => enemyPickSet.has(id))
+                .map((id) => championMap[id]?.nameKo ?? id)
+            : [];
+          const counteredMyPicks = isAvailable
+            ? champ.counters
+                .filter((id) => myPickSet.has(id))
+                .map((id) => championMap[id]?.nameKo ?? id)
+            : [];
+          const isEnemyCounter = counteredEnemies.length > 0;
+          const isMyPickCounter = counteredMyPicks.length > 0;
 
           return (
             <button
@@ -287,7 +303,11 @@ export function ChampionGrid() {
               onClick={() => hoverChampion(champ.id)}
               onDoubleClick={() => selectChampion(champ.id)}
               title={`${champ.nameKo} (${champ.roles.join('/')} · ${tierBadge.label} ${champ.tier.toFixed(1)})${
-                isCounter ? ` · 카운터: ${counteredEnemies.join(', ')}` : ''
+                isEnemyCounter ? ` · 상대 카운터: ${counteredEnemies.join(', ')}` : ''
+              }${
+                isMyPickCounter
+                  ? ` · 내 픽 카운터(주의): ${counteredMyPicks.join(', ')}`
+                  : ''
               } — 클릭: 임시 선택 / 더블클릭: 즉시 확정`}
               className={`group relative flex flex-col items-center gap-0.5 rounded-md border p-1 text-center transition ${
                 isFearlessLocked
@@ -296,9 +316,13 @@ export function ChampionGrid() {
                     ? 'border-slate-800 bg-slate-950/90 opacity-35'
                     : isHovered
                       ? 'border-amber-400 bg-amber-950/30 ring-1 ring-amber-400'
-                      : isCounter
-                        ? 'border-emerald-500/70 bg-emerald-950/20 hover:border-emerald-400 hover:bg-emerald-950/40'
-                        : 'border-slate-800 bg-slate-950/60 hover:border-sky-500 hover:bg-slate-800/80'
+                      : isMyPickCounter && isEnemyCounter
+                        ? 'border-amber-500/80 bg-amber-950/20 hover:border-amber-400'
+                        : isEnemyCounter
+                          ? 'border-emerald-500/70 bg-emerald-950/20 hover:border-emerald-400 hover:bg-emerald-950/40'
+                          : isMyPickCounter
+                            ? 'border-rose-500/70 bg-rose-950/20 hover:border-rose-400 hover:bg-rose-950/40'
+                            : 'border-slate-800 bg-slate-950/60 hover:border-sky-500 hover:bg-slate-800/80'
               }`}
             >
               <div className="relative aspect-square w-full max-w-[52px] overflow-hidden rounded bg-slate-900">
@@ -312,7 +336,7 @@ export function ChampionGrid() {
                 />
 
                 {/* 좌상단 티어 배지 */}
-                {!isFearlessLocked && !isCurrentUsed && (
+                {isAvailable && (
                   <span
                     className={`absolute left-0 top-0 rounded-br px-1 py-[1px] text-[8px] font-black leading-none shadow ${tierBadge.className}`}
                   >
@@ -320,8 +344,19 @@ export function ChampionGrid() {
                   </span>
                 )}
 
+                {/* 우상단 내 픽 카운터(주의) 배지 — 상대 카운터와 동시에 뜰 때도 겹치지 않도록 분리 */}
+                {isMyPickCounter && (
+                  <span
+                    className="absolute right-0 top-0 flex items-center gap-0.5 rounded-bl bg-rose-500/95 px-1 py-[1px] text-[8px] font-extrabold leading-none text-slate-950 shadow"
+                    title={`내 픽 카운터: ${counteredMyPicks.join(', ')}`}
+                  >
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    주의
+                  </span>
+                )}
+
                 {/* 하단 상대 픽 카운터 배지 */}
-                {isCounter && (
+                {isEnemyCounter && (
                   <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-emerald-500/95 py-[1px] text-[8px] font-extrabold leading-none text-slate-950">
                     <Swords className="h-2.5 w-2.5" />
                     카운터
