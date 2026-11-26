@@ -1,4 +1,4 @@
-import Peer, { type DataConnection } from 'peerjs';
+import Peer, { type DataConnection, type PeerOptions } from 'peerjs';
 import type {
   DraftSide,
   FearlessRule,
@@ -67,6 +67,17 @@ type CloseHandler = () => void;
 
 const PEER_PREFIX = 'lolbpsim-v1-';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+const PEER_OPTIONS: PeerOptions = {
+  debug: 0,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+    ],
+  },
+};
 
 function generateRoomCode(): string {
   let code = '';
@@ -158,7 +169,6 @@ class RoomClient {
   }
 
   connect(): Promise<void> {
-    // PeerJS는 CREATE_ROOM / JOIN_ROOM 시점에 피어를 생성하므로 즉시 성공 반환
     return Promise.resolve();
   }
 
@@ -227,7 +237,7 @@ class RoomClient {
     this.hostSide = hostSide;
     this.latestState = initialState;
 
-    const peer = new Peer(`${PEER_PREFIX}${code}`, { debug: 0 });
+    const peer = new Peer(`${PEER_PREFIX}${code}`, PEER_OPTIONS);
     this.peer = peer;
 
     let opened = false;
@@ -240,7 +250,7 @@ class RoomClient {
             'P2P 시그널링 서버 연결 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.',
         });
       }
-    }, 8000);
+    }, 10000);
 
     peer.on('open', () => {
       opened = true;
@@ -255,38 +265,52 @@ class RoomClient {
     });
 
     peer.on('connection', (conn) => {
-      conn.on('open', () => {
-        let assignedSide: OnlineRole = 'SPECTATOR';
-        if (!this.guestConn || !this.guestConn.open) {
+      const registerGuestAndReply = () => {
+        let assignedSide: OnlineRole;
+
+        if (this.guestConn === conn && this.guestSide) {
+          assignedSide = this.guestSide;
+        } else if (!this.guestConn || !this.guestConn.open) {
           this.guestConn = conn;
           this.guestSide = this.hostSide === 'BLUE' ? 'RED' : 'BLUE';
           assignedSide = this.guestSide;
         } else {
           this.spectatorConns.add(conn);
+          assignedSide = 'SPECTATOR';
         }
 
         const peers = this.getPeersSummary();
-        conn.send({
-          type: 'ROOM_JOINED',
-          roomCode: code,
-          assignedSide,
-          state: this.latestState,
-          peers,
-        } satisfies ServerMessage);
+        if (conn.open) {
+          conn.send({
+            type: 'ROOM_JOINED',
+            roomCode: code,
+            assignedSide,
+            state: this.latestState,
+            peers,
+          } satisfies ServerMessage);
+        }
 
         this.emitMessage({ type: 'PEERS_UPDATED', peers });
         this.broadcastFromHost({ type: 'PEERS_UPDATED', peers }, conn);
-      });
+      };
 
       conn.on('data', (raw) => {
         const msg = raw as Record<string, unknown>;
         if (!msg || typeof msg !== 'object') return;
 
+        if (msg.type === 'HELLO_JOIN') {
+          registerGuestAndReply();
+          return;
+        }
+
         if (msg.type === 'SYNC_STATE' && msg.state) {
           const nextState = msg.state as SyncedDraftPayload;
           this.latestState = nextState;
           this.emitMessage({ type: 'STATE_UPDATED', state: nextState });
-          this.broadcastFromHost({ type: 'STATE_UPDATED', state: nextState }, conn);
+          this.broadcastFromHost(
+            { type: 'STATE_UPDATED', state: nextState },
+            conn,
+          );
         } else if (msg.type === 'SWAP_ROOM_SIDES') {
           this.handleHostSwapSides();
         }
@@ -321,64 +345,82 @@ class RoomClient {
 
     this.isHost = false;
 
-    const peer = new Peer({ debug: 0 });
+    const peer = new Peer(PEER_OPTIONS);
     this.peer = peer;
 
-    let joined = false;
+    let settled = false;
+    let retryTimer: number | null = null;
+
+    const failJoin = (message: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      this.cleanupInternal();
+      this.emitMessage({ type: 'ERROR', message });
+    };
+
     const timeout = window.setTimeout(() => {
-      if (!joined) {
-        this.cleanupInternal();
-        this.emitMessage({
-          type: 'ERROR',
-          message: `방 코드(${roomCode})를 찾을 수 없거나 방장이 오프라인 상태입니다.`,
-        });
-      }
-    }, 8000);
+      failJoin(
+        `방 코드(${roomCode})에 연결할 수 없습니다. 방 코드를 다시 확인하거나 방장이 방에 있는지 확인해 주세요.`,
+      );
+    }, 12000);
 
     peer.on('open', () => {
-      const conn = peer.connect(`${PEER_PREFIX}${roomCode}`, { reliable: true });
+      const conn = peer.connect(`${PEER_PREFIX}${roomCode}`, {
+        reliable: true,
+        serialization: 'json',
+      });
       this.hostConn = conn;
+
+      const sendHello = () => {
+        if (!settled && conn.open) {
+          conn.send({ type: 'HELLO_JOIN' });
+        }
+      };
+
+      conn.on('open', () => {
+        sendHello();
+        // 혹시 첫 핸드셰이크 패킷이 지연/유실될 경우 1.5초 후 1회 재전송
+        retryTimer = window.setTimeout(() => {
+          sendHello();
+        }, 1500);
+      });
 
       conn.on('data', (raw) => {
         const msg = raw as ServerMessage;
         if (!msg || typeof msg !== 'object') return;
         if (msg.type === 'ROOM_JOINED') {
-          joined = true;
+          settled = true;
           window.clearTimeout(timeout);
+          if (retryTimer !== null) window.clearTimeout(retryTimer);
         }
         this.emitMessage(msg);
       });
 
       conn.on('close', () => {
-        window.clearTimeout(timeout);
+        if (!settled) {
+          failJoin(
+            `방(${roomCode})과의 연결이 종료되었습니다. 방장이 나갔거나 네트워크가 차단되었을 수 있습니다.`,
+          );
+          return;
+        }
         this.hostConn = null;
         this.emitClose();
       });
 
       conn.on('error', () => {
-        if (!joined) {
-          window.clearTimeout(timeout);
-          this.cleanupInternal();
-          this.emitMessage({
-            type: 'ERROR',
-            message: `방 코드(${roomCode})에 연결할 수 없습니다.`,
-          });
-        }
+        failJoin(`방 코드(${roomCode})에 연결하는 중 오류가 발생했습니다.`);
       });
     });
 
     peer.on('error', (err) => {
-      window.clearTimeout(timeout);
-      if (!joined) {
-        this.cleanupInternal();
-        const isNotFound = err.type === 'peer-unavailable';
-        this.emitMessage({
-          type: 'ERROR',
-          message: isNotFound
-            ? `존재하지 않는 방 코드(${roomCode})입니다.`
-            : `방 접속에 실패했습니다. (${err.type || 'network'})`,
-        });
-      }
+      const isNotFound = err.type === 'peer-unavailable';
+      failJoin(
+        isNotFound
+          ? `존재하지 않는 방 코드(${roomCode})입니다.`
+          : `방 접속에 실패했습니다. (${err.type || 'network'})`,
+      );
     });
   }
 
